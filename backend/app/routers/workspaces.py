@@ -223,18 +223,41 @@ def sync_workspace(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # Debug: log first member to see field structure from ChatGPT API
+    import logging
+
+    logger = logging.getLogger(__name__)
+    if remote_members:
+        logger.info("[SYNC] First member raw keys: %s", list(remote_members[0].keys()))
+        logger.info("[SYNC] First member raw data: %s", remote_members[0])
+
     session.query(Member).where(Member.org_id == workspace.org_id).delete()
     session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
 
     for item in remote_members:
         created = _parse_datetime(item.get("created") or item.get("created_at"))
+
+        # Normalize role — ChatGPT API returns various strings
+        raw_role = (
+            item.get("role")
+            or item.get("role_name")
+            or item.get("account_type")
+            or "member"
+        ).lower()
+        if raw_role in ("owner", "primary-owner", "primary", "plan_owner"):
+            role = "owner"
+        elif raw_role in ("admin", "operator"):
+            role = "admin"
+        else:
+            role = "member"
+
         session.add(
             Member(
                 org_id=workspace.org_id,
                 remote_id=str(item.get("id") or "") or None,
                 email=item.get("email") or "",
                 name=item.get("name") or "",
-                role=item.get("role") or "member",
+                role=role,
                 status=item.get("status") or "active",
                 invite_date=created,
                 created_at=created,

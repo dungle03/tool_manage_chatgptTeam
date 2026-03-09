@@ -10,9 +10,9 @@ import { ImportDialog } from "@/components/import-dialog";
 import {
   getWorkspaces,
   getWorkspaceMembers,
-  inviteMember,
   kickMember,
   listInvites,
+  syncWorkspace,
 } from "@/lib/api";
 import type { Workspace, Member, Invite } from "@/types/api";
 
@@ -20,6 +20,16 @@ type WorkspaceState = {
   members: Member[];
   invites: Invite[];
   loadedMembers: boolean;
+  syncing: boolean;
+  showInviteForm: boolean;
+};
+
+const DEFAULT_WS_STATE: WorkspaceState = {
+  members: [],
+  invites: [],
+  loadedMembers: false,
+  syncing: false,
+  showInviteForm: false,
 };
 
 export default function DashboardPage() {
@@ -46,44 +56,50 @@ export default function DashboardPage() {
     loadWorkspaces();
   }, [loadWorkspaces]);
 
-  async function loadWorkspaceData(orgId: string) {
+  function updateWsState(orgId: string, patch: Partial<WorkspaceState>) {
+    setWsStates((prev) => ({
+      ...prev,
+      [orgId]: { ...(prev[orgId] ?? DEFAULT_WS_STATE), ...patch },
+    }));
+  }
+
+  async function loadMembers(orgId: string) {
     try {
       const [members, invites] = await Promise.all([
         getWorkspaceMembers(orgId),
         listInvites(orgId).catch(() => [] as Invite[]),
       ]);
-      setWsStates((prev) => ({
-        ...prev,
-        [orgId]: { members, invites, loadedMembers: true },
-      }));
+      updateWsState(orgId, { members, invites, loadedMembers: true });
     } catch {
       setError(`Không thể tải dữ liệu workspace ${orgId}`);
     }
   }
 
-  async function handleInvite(orgId: string, email: string, role: string) {
+  // Nút ↺ Sync — gọi real API ChatGPT, sau đó reload
+  async function handleSync(orgId: string) {
+    updateWsState(orgId, { syncing: true });
     try {
-      await inviteMember({ org_id: orgId, email, role });
-      await loadWorkspaceData(orgId);
+      await syncWorkspace(orgId);
+      await loadMembers(orgId);
+      await loadWorkspaces(); // cập nhật member_count
     } catch {
-      setError("Không thể gửi lời mời.");
+      setError(`Sync thất bại cho workspace ${orgId}. Token có thể đã hết hạn.`);
+    } finally {
+      updateWsState(orgId, { syncing: false });
     }
   }
 
   async function handleKick(orgId: string, memberId: number) {
     try {
       await kickMember({ org_id: orgId, member_id: memberId });
-      await loadWorkspaceData(orgId);
+      await loadMembers(orgId);
     } catch {
       setError("Không thể xóa thành viên.");
     }
   }
 
-  // Totals for summary
-  const totalMembers = Object.values(wsStates).reduce(
-    (sum, s) => sum + s.members.filter((m) => m.status === "active").length,
-    0
-  );
+  // Tính tổng cho DashboardSummary
+  const totalMembers = workspaces.reduce((s, w) => s + (w.member_count ?? 0), 0);
   const totalPending = Object.values(wsStates).reduce(
     (sum, s) => sum + s.invites.filter((i) => i.status === "pending").length,
     0
@@ -105,7 +121,6 @@ export default function DashboardPage() {
         </button>
       </div>
 
-
       <DashboardSummary
         totalTeams={workspaces.length}
         totalMembers={totalMembers}
@@ -116,9 +131,7 @@ export default function DashboardPage() {
       {error && (
         <div role="alert" aria-live="polite" className="error-banner">
           {error}
-          <button onClick={() => setError(null)} className="error-dismiss">
-            ✕
-          </button>
+          <button onClick={() => setError(null)} className="error-dismiss">✕</button>
         </div>
       )}
 
@@ -132,14 +145,14 @@ export default function DashboardPage() {
       {!loading && workspaces.length === 0 && (
         <div className="empty-state">
           <div className="empty-icon">🏢</div>
-          <p>Chưa có workspace nào. Hãy import Access Token từ ChatGPT để bắt đầu.</p>
+          <p>Chưa có workspace nào. Nhấn <strong>+ Thêm Team</strong> để import từ ChatGPT.</p>
         </div>
       )}
 
       {/* Accordion Workspace List */}
       <div className="workspace-list">
         {workspaces.map((ws) => {
-          const state = wsStates[ws.org_id] ?? { members: [], invites: [], loadedMembers: false };
+          const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
           const wsStatus =
             ws.status === "live" ? "synced" :
             ws.status === "error" ? "error" : "warning";
@@ -152,17 +165,30 @@ export default function DashboardPage() {
               memberLimit={ws.member_limit}
               status={wsStatus}
               lastSync={ws.last_sync}
-              onSync={() => loadWorkspaceData(ws.org_id)}
-              onInvite={() => {/* open invite panel */}}
+              syncing={state.syncing}
+              onSync={() => handleSync(ws.org_id)}
+              onInvite={() => {
+                // Toggle inline invite form
+                updateWsState(ws.org_id, {
+                  showInviteForm: !state.showInviteForm,
+                  loadedMembers: state.loadedMembers,
+                });
+              }}
               expandedContent={
                 <div className="workspace-detail">
                   {!state.loadedMembers ? (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => loadWorkspaceData(ws.org_id)}
-                    >
-                      ↺ Tải dữ liệu
-                    </button>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleSync(ws.org_id)}
+                        disabled={state.syncing}
+                      >
+                        {state.syncing ? "⏳ Đang sync..." : "↺ Sync từ ChatGPT"}
+                      </button>
+                      <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                        Chưa tải dữ liệu. Nhấn Sync để lấy danh sách từ ChatGPT.
+                      </span>
+                    </div>
                   ) : (
                     <>
                       <MemberTable
@@ -170,14 +196,21 @@ export default function DashboardPage() {
                         onKick={(memberId) => handleKick(ws.org_id, memberId)}
                       />
 
-                      <div className="section-panel">
-                        <h3 className="section-title">Mời thành viên mới</h3>
-                        <InvitePanel onInvite={(email, role) => handleInvite(ws.org_id, email, role)} />
-                      </div>
+                      {state.showInviteForm && (
+                        <div className="section-panel">
+                          <h3 className="section-title">📩 Mời thành viên mới</h3>
+                          <InvitePanel
+                            orgId={ws.org_id}
+                            onDone={() => loadMembers(ws.org_id)}
+                          />
+                        </div>
+                      )}
 
                       {state.invites.length > 0 && (
                         <div className="section-panel">
-                          <h3 className="section-title">Lời mời đang chờ ({state.invites.length})</h3>
+                          <h3 className="section-title">
+                            ⏳ Lời mời đang chờ ({state.invites.length})
+                          </h3>
                           <InviteList invites={state.invites} />
                         </div>
                       )}
@@ -193,7 +226,7 @@ export default function DashboardPage() {
       {showImport && (
         <ImportDialog
           onClose={() => setShowImport(false)}
-          onImported={(orgId) => {
+          onImported={() => {
             setShowImport(false);
             loadWorkspaces();
           }}

@@ -9,6 +9,7 @@ type WorkspaceCardProps = {
   status: "synced" | "warning" | "error";
   selected?: boolean;
   lastSync?: string | null;
+  syncing?: boolean;
   expandedContent?: ReactNode;
   onSync?: () => void;
   onInvite?: () => void;
@@ -31,6 +32,7 @@ export function WorkspaceCard({
   status,
   selected,
   lastSync,
+  syncing = false,
   expandedContent,
   onSync,
   onInvite,
@@ -39,7 +41,6 @@ export function WorkspaceCard({
 }: WorkspaceCardProps) {
   const [expanded, setExpanded] = useState(selected ?? false);
   const pct = memberLimit > 0 ? Math.round((members / memberLimit) * 100) : 0;
-
   const statusLabel = status === "synced" ? "SỐNG" : status === "warning" ? "CẢNH BÁO" : "LỖI";
   const badgeClass =
     status === "synced" ? "badge-synced" : status === "warning" ? "badge-warning" : "badge-error";
@@ -102,9 +103,10 @@ export function WorkspaceCard({
           <button
             onClick={onSync}
             title="Sync"
-            style={toolbarBtnStyle}
+            disabled={syncing}
+            style={{ ...toolbarBtnStyle, opacity: syncing ? 0.5 : 1 }}
           >
-            ↺
+            <span style={{ display: "inline-block", animation: syncing ? "spin 1s linear infinite" : "none" }}>↺</span>
           </button>
           <button
             onClick={onEdit}
