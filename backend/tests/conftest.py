@@ -24,6 +24,14 @@ def seed_data():
 
         member = Member(
             org_id="org_001",
+            email="member1@company.com",
+            name="Member One",
+            role="member",
+            status="active",
+            invite_date=datetime.utcnow(),
+        )
+        owner = Member(
+            org_id="org_001",
             email="owner@company.com",
             name="Owner",
             role="owner",
@@ -37,7 +45,7 @@ def seed_data():
             status="pending",
             created_at=datetime.utcnow(),
         )
-        session.add_all([member, invite])
+        session.add_all([member, owner, invite])
         session.commit()
         yield
     finally:
