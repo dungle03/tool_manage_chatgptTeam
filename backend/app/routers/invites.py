@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,10 +25,28 @@ def get_invites(org_id: str, session: Session = Depends(get_session)):
 
 
 @router.post("/api/resend-invite")
-def resend_invite(payload: dict):
-    return {"ok": True, "payload": payload}
+def resend_invite(payload: dict, session: Session = Depends(get_session)):
+    org_id = payload.get("org_id")
+    invite_id = payload.get("invite_id")
+    row = session.execute(
+        select(Invite).where(Invite.org_id == org_id, Invite.invite_id == invite_id)
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="invite not found")
+    row.status = "pending"
+    session.commit()
+    return {"ok": True, "status": row.status, "invite_id": row.invite_id}
 
 
 @router.delete("/api/cancel-invite")
-def cancel_invite(payload: dict):
-    return {"ok": True, "payload": payload}
+def cancel_invite(payload: dict, session: Session = Depends(get_session)):
+    org_id = payload.get("org_id")
+    invite_id = payload.get("invite_id")
+    row = session.execute(
+        select(Invite).where(Invite.org_id == org_id, Invite.invite_id == invite_id)
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="invite not found")
+    row.status = "cancelled"
+    session.commit()
+    return {"ok": True, "status": row.status, "invite_id": row.invite_id}
