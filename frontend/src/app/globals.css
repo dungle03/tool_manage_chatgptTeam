@@ -521,6 +521,7 @@ textarea {
   width: 100%;
   border-collapse: collapse;
   margin-top: 18px;
+  table-layout: fixed;
 }
 
 .data-table thead th {
@@ -532,6 +533,21 @@ textarea {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   border-bottom: 1px solid var(--border-color);
+}
+
+.data-table thead th:nth-child(1),
+.data-table tbody td:nth-child(1) {
+  width: 31%;
+}
+
+.data-table thead th:nth-child(2),
+.data-table tbody td:nth-child(2) {
+  width: 37%;
+}
+
+.data-table thead th:nth-child(3),
+.data-table tbody td:nth-child(3) {
+  width: 108px;
 }
 
 .data-table tbody td {
@@ -554,6 +570,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .member-avatar {
@@ -568,18 +585,26 @@ textarea {
   color: #dbe1ff;
   font-size: 13px;
   font-weight: 700;
+  flex: none;
 }
 
 .member-info {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .member-name,
 .invite-email {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+.member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-subtle,
@@ -589,8 +614,18 @@ textarea {
   font-size: 12px;
 }
 
+.member-subtle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .member-email {
+  display: inline-block;
+  max-width: 100%;
   color: #cfd8ff;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .role-owner {
@@ -618,6 +653,9 @@ textarea {
 }
 
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 34px;
   padding: 0 12px;
   border-radius: 10px;
@@ -630,9 +668,29 @@ textarea {
   transition: all var(--transition);
 }
 
-.action-btn-kick {
-  min-width: 96px;
+.action-btn-kick,
+.action-pill {
+  min-width: 92px;
   justify-content: center;
+}
+
+.action-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.028);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.action-pill-protected {
+  color: #97a4bc;
+  background: rgba(255, 255, 255, 0.024);
 }
 
 .action-btn-loading {
@@ -650,6 +708,28 @@ textarea {
 .action-btn:disabled {
   opacity: 0.82;
   cursor: wait;
+}
+
+.table-action-head,
+.table-action-cell {
+  width: 118px;
+  min-width: 118px;
+  text-align: center !important;
+}
+
+.table-action-cell {
+  white-space: nowrap;
+}
+
+.table-action-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.table-action-cell .muted-inline {
+  white-space: nowrap;
 }
 
 .btn {

@@ -104,21 +104,23 @@ export function MemberTable({
                     <span className={`role-pill ${role.className}`}>{role.label}</span>
                   </td>
                   <td className="table-action-cell">
-                    {isOwner || !onKick ? (
-                      <span className="muted-inline">Protected</span>
-                    ) : (() => {
-                      const isBusy = busyMemberIds.includes(member.id);
+                    <div className="table-action-content">
+                      {isOwner || !onKick ? (
+                        <span className="action-pill action-pill-protected">Protected</span>
+                      ) : (() => {
+                        const isBusy = busyMemberIds.includes(member.id);
 
-                      return (
-                        <button
-                          className={`action-btn action-btn-kick${isBusy ? " action-btn-loading" : ""}`}
-                          onClick={() => setTarget(member)}
-                          disabled={isBusy}
-                        >
-                          {isBusy ? "Removing..." : "Kick"}
-                        </button>
-                      );
-                    })()}
+                        return (
+                          <button
+                            className={`action-btn action-btn-kick${isBusy ? " action-btn-loading" : ""}`}
+                            onClick={() => setTarget(member)}
+                            disabled={isBusy}
+                          >
+                            {isBusy ? "Removing..." : "Kick"}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   </td>
                 </tr>
               );
