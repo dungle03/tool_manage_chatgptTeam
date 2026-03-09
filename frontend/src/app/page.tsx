@@ -48,37 +48,6 @@ export default function DashboardPage() {
       setError(null);
       const data = await getWorkspaces();
       setWorkspaces(data);
-
-      const cachedWorkspaces = data.filter((ws) => Boolean(ws.last_sync) || ws.member_count > 0);
-      if (cachedWorkspaces.length === 0) return;
-
-      const hydrated = await Promise.all(
-        cachedWorkspaces.map(async (ws) => {
-          try {
-            const [members, invites] = await Promise.all([
-              getWorkspaceMembers(ws.org_id),
-              listInvites(ws.org_id).catch(() => [] as Invite[]),
-            ]);
-            return { orgId: ws.org_id, members, invites, ok: true as const };
-          } catch {
-            return { orgId: ws.org_id, members: [] as Member[], invites: [] as Invite[], ok: false as const };
-          }
-        })
-      );
-
-      setWsStates((prev) => {
-        const next = { ...prev };
-        for (const item of hydrated) {
-          if (!item.ok) continue;
-          next[item.orgId] = {
-            ...(prev[item.orgId] ?? DEFAULT_WS_STATE),
-            members: item.members,
-            invites: item.invites,
-            loadedMembers: true,
-          };
-        }
-        return next;
-      });
     } catch {
       setError("Không thể tải danh sách workspace. Hãy kiểm tra backend đã chạy chưa.");
     } finally {
@@ -99,6 +68,7 @@ export default function DashboardPage() {
   }
 
   async function loadMembers(orgId: string) {
+    updateWsState(orgId, { syncing: true });
     try {
       const [members, invites] = await Promise.all([
         getWorkspaceMembers(orgId),
@@ -107,6 +77,8 @@ export default function DashboardPage() {
       updateWsState(orgId, { members, invites, loadedMembers: true });
     } catch {
       setError(`Không thể tải dữ liệu workspace ${orgId}`);
+    } finally {
+      updateWsState(orgId, { syncing: false });
     }
   }
 
@@ -119,7 +91,6 @@ export default function DashboardPage() {
       await loadWorkspaces(); // cập nhật member_count
     } catch {
       setError(`Sync thất bại cho workspace ${orgId}. Token có thể đã hết hạn.`);
-    } finally {
       updateWsState(orgId, { syncing: false });
     }
   }
@@ -231,11 +202,15 @@ export default function DashboardPage() {
               onSync={() => handleSync(ws.org_id)}
               onDelete={() => setDeletingWs(ws)}
               onInvite={() => {
-                // Toggle inline invite form
                 updateWsState(ws.org_id, {
                   showInviteForm: !state.showInviteForm,
                   loadedMembers: state.loadedMembers,
                 });
+              }}
+              onExpandedChange={(expanded) => {
+                if (expanded && !state.loadedMembers && (Boolean(ws.last_sync) || ws.member_count > 0) && !state.syncing) {
+                  void loadMembers(ws.org_id);
+                }
               }}
               expandedContent={
                 <div className="workspace-detail">
@@ -243,21 +218,34 @@ export default function DashboardPage() {
                     <div className="section-panel section-panel-center">
                       <div className="section-heading-row compact-heading-row">
                         <div>
-                          <h3 className="section-heading">Workspace data chưa được tải</h3>
+                          <h3 className="section-heading">
+                            {ws.last_sync || ws.member_count > 0 ? "Đang tải dữ liệu workspace" : "Workspace data chưa được tải"}
+                          </h3>
                           <p className="section-description">
-                            Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT.
+                            {ws.last_sync || ws.member_count > 0
+                              ? "Đang đọc dữ liệu local đã sync trước đó để hiển thị members và invites."
+                              : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
                           </p>
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => handleSync(ws.org_id)}
-                          disabled={state.syncing}
-                        >
-                          {state.syncing ? "Đang sync..." : "Sync workspace"}
-                        </button>
-                        <span className="workspace-helper-copy">Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.</span>
+                        {ws.last_sync || ws.member_count > 0 ? (
+                          <>
+                            <div className="loading-spinner" />
+                            <span className="workspace-helper-copy">Đang tải dữ liệu cục bộ của workspace...</span>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => handleSync(ws.org_id)}
+                              disabled={state.syncing}
+                            >
+                              {state.syncing ? "Đang sync..." : "Sync workspace"}
+                            </button>
+                            <span className="workspace-helper-copy">Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (

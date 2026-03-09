@@ -14,7 +14,9 @@ type WorkspaceCardProps = {
   onSync?: () => void;
   onInvite?: () => void;
   onDelete?: () => void;
+  onExpandedChange?: (expanded: boolean) => void;
 };
+
 
 function formatSyncTime(lastSync?: string | null): string {
   if (!lastSync) return "Chưa sync";
@@ -37,6 +39,7 @@ export function WorkspaceCard({
   onSync,
   onInvite,
   onDelete,
+  onExpandedChange,
 }: WorkspaceCardProps) {
   const [expanded, setExpanded] = useState(selected ?? false);
   const seatLimit = 5;
@@ -51,7 +54,13 @@ export function WorkspaceCard({
         <button
           aria-label={expanded ? `Thu gọn ${title}` : `Mở ${title}`}
           className="workspace-card-main"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => {
+            setExpanded((prev) => {
+              const next = !prev;
+              onExpandedChange?.(next);
+              return next;
+            });
+          }}
           id={`workspace-toggle-${title.replace(/\s+/g, "-").toLowerCase()}`}
         >
           <div className="workspace-card-heading">

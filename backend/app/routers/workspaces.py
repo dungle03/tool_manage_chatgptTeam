@@ -299,8 +299,10 @@ async def sync_workspace(
 
     try:
         access_token = await _resolve_access_token(workspace)
-        remote_members = await chatgpt_service.get_members(access_token, account_id)
-        remote_invites = await chatgpt_service.get_invites(access_token, account_id)
+        remote_members, remote_invites = await asyncio.gather(
+            chatgpt_service.get_members(access_token, account_id),
+            chatgpt_service.get_invites(access_token, account_id),
+        )
     except HTTPException:
         raise
     except Exception as exc:
