@@ -2,15 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite
+from app.schemas import InviteActionRequest
 
 router = APIRouter()
 
 
 @router.get("/api/invites")
-def get_invites(org_id: str, session: Session = Depends(get_session)):
-    rows = session.execute(select(Invite).where(Invite.org_id == org_id)).scalars().all()
+def get_invites(
+    org_id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    rows = (
+        session.execute(select(Invite).where(Invite.org_id == org_id)).scalars().all()
+    )
     return [
         {
             "id": row.id,
@@ -25,11 +33,15 @@ def get_invites(org_id: str, session: Session = Depends(get_session)):
 
 
 @router.post("/api/resend-invite")
-def resend_invite(payload: dict, session: Session = Depends(get_session)):
-    org_id = payload.get("org_id")
-    invite_id = payload.get("invite_id")
+def resend_invite(
+    payload: InviteActionRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     row = session.execute(
-        select(Invite).where(Invite.org_id == org_id, Invite.invite_id == invite_id)
+        select(Invite).where(
+            Invite.org_id == payload.org_id, Invite.invite_id == payload.invite_id
+        )
     ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="invite not found")
@@ -39,11 +51,15 @@ def resend_invite(payload: dict, session: Session = Depends(get_session)):
 
 
 @router.delete("/api/cancel-invite")
-def cancel_invite(payload: dict, session: Session = Depends(get_session)):
-    org_id = payload.get("org_id")
-    invite_id = payload.get("invite_id")
+def cancel_invite(
+    payload: InviteActionRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     row = session.execute(
-        select(Invite).where(Invite.org_id == org_id, Invite.invite_id == invite_id)
+        select(Invite).where(
+            Invite.org_id == payload.org_id, Invite.invite_id == payload.invite_id
+        )
     ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="invite not found")

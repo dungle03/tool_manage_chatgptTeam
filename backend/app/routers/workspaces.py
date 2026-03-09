@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Member, Workspace
 
@@ -9,7 +10,10 @@ router = APIRouter()
 
 
 @router.get("/api/workspaces")
-def get_workspaces(session: Session = Depends(get_session)):
+def get_workspaces(
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     rows = session.execute(select(Workspace)).scalars().all()
     return [
         {
@@ -24,7 +28,11 @@ def get_workspaces(session: Session = Depends(get_session)):
 
 
 @router.get("/api/workspaces/{id}/members")
-def get_workspace_members(id: str, session: Session = Depends(get_session)):
+def get_workspace_members(
+    id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     rows = session.execute(select(Member).where(Member.org_id == id)).scalars().all()
     return [
         {

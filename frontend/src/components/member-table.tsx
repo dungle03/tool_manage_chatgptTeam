@@ -3,8 +3,26 @@
 import { useState } from "react";
 import type { Member } from "@/types/api";
 
-export function MemberTable({ members }: { members: Member[] }) {
+export function MemberTable({
+  members,
+  onKick,
+}: {
+  members: Member[];
+  onKick?: (memberId: number) => Promise<void>;
+}) {
   const [target, setTarget] = useState<Member | null>(null);
+  const [kicking, setKicking] = useState(false);
+
+  async function handleConfirmKick() {
+    if (!target || !onKick) return;
+    setKicking(true);
+    try {
+      await onKick(target.id);
+    } finally {
+      setKicking(false);
+      setTarget(null);
+    }
+  }
 
   return (
     <div>
@@ -26,7 +44,9 @@ export function MemberTable({ members }: { members: Member[] }) {
               <td>{m.invite_date ?? "-"}</td>
               <td>{m.status}</td>
               <td>
-                <button onClick={() => setTarget(m)}>Kick</button>
+                {m.role !== "owner" && (
+                  <button onClick={() => setTarget(m)}>Kick</button>
+                )}
               </td>
             </tr>
           ))}
@@ -38,7 +58,9 @@ export function MemberTable({ members }: { members: Member[] }) {
           <p>Confirm kick member</p>
           <p>{target.email}</p>
           <button onClick={() => setTarget(null)}>Cancel</button>
-          <button>Confirm</button>
+          <button onClick={handleConfirmKick} disabled={kicking}>
+            {kicking ? "Kicking..." : "Confirm"}
+          </button>
         </div>
       )}
     </div>

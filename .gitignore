@@ -1,1 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+*.egg
+
+# Database
+*.db
+*.sqlite3
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+dist/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+*.log
+
+# AWF / Worktrees
 .worktrees/
+
+# Test output
+vitest_out*.txt
+vitest_all.txt
+vitest_output.txt
+
+# Package lock (optional - uncomment if you want to track it)
+# frontend/package-lock.json

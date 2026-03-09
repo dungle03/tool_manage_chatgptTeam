@@ -14,3 +14,12 @@ export type Member = {
   status: string;
   invite_date: string | null;
 };
+
+export type Invite = {
+  id: number;
+  org_id: string;
+  email: string;
+  invite_id: string;
+  status: string;
+  created_at: string;
+};

@@ -1,42 +1,46 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite, Member
+from app.schemas import InviteRequest, KickMemberRequest
 
 router = APIRouter()
 
 
 @router.post("/api/invite")
-def invite_member(payload: dict, session: Session = Depends(get_session)):
-    org_id = payload.get("org_id")
-    email = payload.get("email")
-    role = payload.get("role", "member")
-    if not org_id or not email:
-        raise HTTPException(status_code=400, detail="org_id and email are required")
-
+def invite_member(
+    payload: InviteRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     invite = Invite(
-        org_id=org_id,
-        email=email,
+        org_id=payload.org_id,
+        email=payload.email,
         invite_id=f"inv_{uuid4().hex[:10]}",
         status="pending",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     session.add(invite)
     session.commit()
-    return {"ok": True, "invite_id": invite.invite_id, "role": role}
+    return {"ok": True, "invite_id": invite.invite_id, "role": payload.role}
 
 
 @router.delete("/api/member")
-def delete_member(payload: dict, session: Session = Depends(get_session)):
-    org_id = payload.get("org_id")
-    member_id = payload.get("member_id")
+def delete_member(
+    payload: KickMemberRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
     row = session.execute(
-        select(Member).where(Member.org_id == org_id, Member.id == member_id)
+        select(Member).where(
+            Member.org_id == payload.org_id, Member.id == payload.member_id
+        )
     ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="member not found")

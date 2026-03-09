@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -28,7 +28,7 @@ def seed_data():
             name="Member One",
             role="member",
             status="active",
-            invite_date=datetime.utcnow(),
+            invite_date=datetime.now(timezone.utc),
         )
         owner = Member(
             org_id="org_001",
@@ -36,14 +36,14 @@ def seed_data():
             name="Owner",
             role="owner",
             status="active",
-            invite_date=datetime.utcnow(),
+            invite_date=datetime.now(timezone.utc),
         )
         invite = Invite(
             org_id="org_001",
             email="pending@company.com",
             invite_id="inv_seed_1",
             status="pending",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         session.add_all([member, owner, invite])
         session.commit()
