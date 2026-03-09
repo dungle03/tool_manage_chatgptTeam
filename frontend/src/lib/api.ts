@@ -38,7 +38,7 @@ export async function importTeam(payload: {
   return requestJson<ImportTeamResponse>("/api/teams/import", "POST", payload);
 }
 
-export async function inviteMember(payload: { org_id: string; email: string; role: string }): Promise<MutationResponse> {
+export async function inviteMember(payload: { org_id: string; email: string; role?: string }): Promise<MutationResponse> {
   return requestJson<MutationResponse>("/api/invite", "POST", payload);
 }
 

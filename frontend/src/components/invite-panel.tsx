@@ -10,7 +10,6 @@ type InvitePanelProps = {
 
 export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("member");
   const [sending, setSending] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +23,7 @@ export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
     setSuccess(false);
 
     try {
-      await inviteMember({ org_id: orgId, email: email.trim(), role });
+      await inviteMember({ org_id: orgId, email: email.trim() });
       setEmail("");
       setSuccess(true);
       onDone?.();
@@ -39,16 +38,16 @@ export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
 
   return (
     <form className="invite-form-card" onSubmit={handleSubmit}>
-      <div className="section-heading-row compact-heading-row">
+      <div className="section-heading-row compact-heading-row invite-panel-header">
         <div>
           <h3 className="section-heading">Invite a new member</h3>
-          <p className="section-description">Nhập email và phân quyền trước khi gửi lời mời.</p>
+          <p className="section-description">Nhập email công việc và chọn quyền trước khi gửi lời mời vào workspace.</p>
         </div>
       </div>
 
-      <div className="invite-form-grid">
-        <div className="form-group">
-          <label className="form-label">Email</label>
+      <div className="invite-form-grid invite-form-grid-single">
+        <div className="form-group invite-form-group-primary">
+          <label className="form-label" htmlFor={`invite-email-${orgId}`}>Email</label>
           <input
             className="input"
             value={email}
@@ -59,15 +58,10 @@ export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
             id={`invite-email-${orgId}`}
           />
         </div>
+      </div>
 
-        <div className="form-group form-group-narrow">
-          <label className="form-label">Role</label>
-          <select className="select" value={role} onChange={(e) => setRole(e.target.value)} id={`invite-role-${orgId}`}>
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-
+      <div className="invite-form-actions">
+        <p className="invite-form-note">Chỉ cần nhập email để gửi lời mời. Thành viên mới sẽ vào danh sách pending invites ngay sau khi gửi.</p>
         <div className="invite-submit-wrap">
           <button className="btn btn-primary invite-submit-btn" type="submit" disabled={sending} id={`invite-submit-${orgId}`}>
             {sending ? "Sending..." : "Send invite"}

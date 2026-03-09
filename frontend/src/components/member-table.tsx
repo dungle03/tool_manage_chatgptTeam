@@ -30,9 +30,11 @@ function initialsOf(name: string, email: string): string {
 
 export function MemberTable({
   members,
+  busyMemberIds = [],
   onKick,
 }: {
   members: Member[];
+  busyMemberIds?: number[];
   onKick?: (memberId: number) => Promise<void>;
 }) {
   const [target, setTarget] = useState<Member | null>(null);
@@ -104,11 +106,19 @@ export function MemberTable({
                   <td className="table-action-cell">
                     {isOwner || !onKick ? (
                       <span className="muted-inline">Protected</span>
-                    ) : (
-                      <button className="action-btn action-btn-kick" onClick={() => setTarget(member)}>
-                        Kick
-                      </button>
-                    )}
+                    ) : (() => {
+                      const isBusy = busyMemberIds.includes(member.id);
+
+                      return (
+                        <button
+                          className={`action-btn action-btn-kick${isBusy ? " action-btn-loading" : ""}`}
+                          onClick={() => setTarget(member)}
+                          disabled={isBusy}
+                        >
+                          {isBusy ? "Removing..." : "Kick"}
+                        </button>
+                      );
+                    })()}
                   </td>
                 </tr>
               );

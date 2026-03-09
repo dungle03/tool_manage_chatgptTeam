@@ -12,7 +12,6 @@ type WorkspaceCardProps = {
   syncing?: boolean;
   expandedContent?: ReactNode;
   onSync?: () => void;
-  onInvite?: () => void;
   onDelete?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
 };
@@ -37,7 +36,6 @@ export function WorkspaceCard({
   syncing = false,
   expandedContent,
   onSync,
-  onInvite,
   onDelete,
   onExpandedChange,
 }: WorkspaceCardProps) {
@@ -95,26 +93,21 @@ export function WorkspaceCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onInvite?.();
-            }}
-            className="btn btn-secondary btn-compact"
-            id={`workspace-invite-${title.replace(/\s+/g, "-").toLowerCase()}`}
-          >
-            Invite
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
               onSync?.();
             }}
             disabled={syncing}
-            className="btn btn-secondary btn-compact"
+            className="btn btn-secondary btn-compact workspace-sync-btn"
             id={`workspace-sync-${title.replace(/\s+/g, "-").toLowerCase()}`}
           >
-            <span style={{ display: "inline-block", animation: syncing ? "spin 1s linear infinite" : "none" }}>
-              ↺
+            <span className={`sync-icon${syncing ? " is-spinning" : ""}`} aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16.2 10a6.2 6.2 0 0 1-10.58 4.38" />
+                <path d="M3.8 10a6.2 6.2 0 0 1 10.58-4.38" />
+                <path d="M4.45 13.9H5.8v-1.36" />
+                <path d="M14.2 6.1h1.35V7.46" />
+              </svg>
             </span>
-            {syncing ? "Syncing" : "Sync"}
+            <span className="workspace-sync-label">{syncing ? "Syncing" : "Sync"}</span>
           </button>
           <button
             onClick={(e) => {

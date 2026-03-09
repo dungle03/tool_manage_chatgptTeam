@@ -394,6 +394,38 @@ textarea {
   flex-wrap: wrap;
 }
 
+.workspace-sync-btn {
+  gap: 8px;
+}
+
+.sync-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: rgba(228, 234, 255, 0.92);
+  transition: transform 0.22s ease, color 0.22s ease;
+}
+
+.sync-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.workspace-sync-btn:hover .sync-icon {
+  color: #ffffff;
+  transform: rotate(-18deg);
+}
+
+.sync-icon.is-spinning {
+  animation: spin 0.95s linear infinite;
+}
+
+.workspace-sync-label {
+  display: inline-block;
+}
+
 .workspace-accordion-content {
   border-top: 1px solid var(--border-color);
   background: linear-gradient(180deg, rgba(10, 13, 18, 0.95), rgba(8, 10, 14, 1));
@@ -509,8 +541,13 @@ textarea {
   font-size: 14px;
 }
 
+.data-table tbody tr {
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
 .data-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.028);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .member-cell {
@@ -594,14 +631,25 @@ textarea {
 }
 
 .action-btn-kick {
-  min-width: 74px;
+  min-width: 96px;
   justify-content: center;
 }
 
-.action-btn:hover {
+.action-btn-loading {
+  color: var(--danger);
+  border-color: rgba(255, 125, 135, 0.2);
+  background: rgba(255, 125, 135, 0.08);
+}
+
+.action-btn:hover:not(:disabled) {
   background: var(--danger-soft);
   color: var(--danger);
   border-color: rgba(255, 125, 135, 0.2);
+}
+
+.action-btn:disabled {
+  opacity: 0.82;
+  cursor: wait;
 }
 
 .btn {
@@ -614,7 +662,7 @@ textarea {
   border-radius: 12px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
   font-size: 13px;
   font-weight: 650;
   white-space: nowrap;
@@ -634,15 +682,18 @@ textarea {
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
   background: linear-gradient(180deg, #ffffff 0%, #dbe2ff 100%);
+  box-shadow: 0 14px 30px rgba(162, 178, 255, 0.28);
 }
 
 .btn-secondary {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.03);
   border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .btn-secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.06);
 }
@@ -651,9 +702,11 @@ textarea {
   color: var(--danger);
   background: rgba(255, 125, 135, 0.08);
   border-color: rgba(255, 125, 135, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .btn-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
   background: rgba(255, 125, 135, 0.14);
   border-color: rgba(255, 125, 135, 0.24);
 }
@@ -665,12 +718,17 @@ textarea {
 }
 
 .btn-ghost:hover:not(:disabled) {
+  transform: translateY(-1px);
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.04);
 }
 
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
 .btn:disabled {
-  opacity: 0.58;
+  opacity: 0.64;
   cursor: not-allowed;
 }
 
@@ -729,16 +787,46 @@ textarea {
   padding: 18px;
 }
 
+.invite-panel-header {
+  margin-bottom: 6px;
+}
+
 .invite-form-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px auto;
+  grid-template-columns: minmax(0, 1.8fr) minmax(140px, 180px);
   gap: 12px;
   margin-top: 16px;
   align-items: end;
 }
 
+.invite-form-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.invite-form-group-primary {
+  min-width: 0;
+}
+
+.invite-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.invite-form-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  flex: 1 1 240px;
+}
+
 .invite-submit-wrap {
   display: flex;
+  min-width: 170px;
 }
 
 .invite-submit-btn {
@@ -780,20 +868,62 @@ textarea {
 
 .invite-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.018));
+  transition: transform var(--transition), border-color var(--transition), background var(--transition), box-shadow var(--transition), opacity var(--transition);
+}
+
+.invite-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.022));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+.invite-item-busy {
+  opacity: 0.84;
 }
 
 .invite-item-main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+}
+
+.invite-email {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.invite-meta {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.invite-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.invite-item-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .error-banner {
@@ -804,6 +934,129 @@ textarea {
   padding: 14px 16px;
   border-radius: 16px;
   font-size: 14px;
+}
+
+.toast-stack {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.toast-item {
+  position: relative;
+  overflow: hidden;
+  min-width: 320px;
+  max-width: 400px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+  animation: toastIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-accent {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.toast-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toast-title {
+  color: #f6f8ff;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.toast-message {
+  color: rgba(225, 231, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.toast-success {
+  background: linear-gradient(135deg, rgba(9, 22, 20, 0.97), rgba(16, 52, 41, 0.92));
+  border-color: rgba(69, 214, 168, 0.24);
+}
+
+.toast-success .toast-accent {
+  color: #063326;
+  background: linear-gradient(135deg, rgba(123, 255, 211, 0.96), rgba(69, 214, 168, 0.92));
+  box-shadow: 0 10px 24px rgba(69, 214, 168, 0.24);
+}
+
+.toast-error {
+  background: linear-gradient(135deg, rgba(38, 14, 18, 0.97), rgba(78, 24, 33, 0.94));
+  border-color: rgba(255, 125, 135, 0.24);
+}
+
+.toast-error .toast-accent {
+  color: #3d0910;
+  background: linear-gradient(135deg, rgba(255, 185, 193, 0.98), rgba(255, 125, 135, 0.92));
+  box-shadow: 0 10px 24px rgba(255, 125, 135, 0.24);
+}
+
+.toast-info {
+  background: linear-gradient(135deg, rgba(14, 20, 40, 0.97), rgba(23, 38, 74, 0.94));
+  border-color: rgba(124, 140, 255, 0.25);
+}
+
+.toast-info .toast-accent {
+  color: #0f1e57;
+  background: linear-gradient(135deg, rgba(193, 208, 255, 0.98), rgba(124, 140, 255, 0.92));
+  box-shadow: 0 10px 24px rgba(124, 140, 255, 0.22);
+}
+
+.toast-close {
+  position: relative;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.92;
+  transition: color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-close:hover {
+  color: #ffffff;
+  opacity: 1;
+  transform: scale(1.04);
+}
+
+.toast-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08));
+  transform-origin: left;
+  animation: toastProgress 3.6s linear forwards;
 }
 
 .error-dismiss,
@@ -894,6 +1147,30 @@ textarea {
   background: linear-gradient(180deg, rgba(16, 19, 26, 0.98), rgba(9, 11, 15, 1));
   box-shadow: var(--shadow-lg);
   animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(1px) scale(1);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastProgress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .confirm-dialog h4,

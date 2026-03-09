@@ -14,6 +14,8 @@ import {
   listInvites,
   syncWorkspace,
   deleteWorkspace,
+  resendInvite,
+  cancelInvite,
 } from "@/lib/api";
 import type { Workspace, Member, Invite } from "@/types/api";
 
@@ -22,7 +24,15 @@ type WorkspaceState = {
   invites: Invite[];
   loadedMembers: boolean;
   syncing: boolean;
-  showInviteForm: boolean;
+  busyMemberIds: number[];
+  inviteActionState: Record<string, "resend" | "revoke">;
+};
+
+type ToastState = {
+  id: number;
+  title: string;
+  message: string;
+  tone: "success" | "error" | "info";
 };
 
 const DEFAULT_WS_STATE: WorkspaceState = {
@@ -30,13 +40,14 @@ const DEFAULT_WS_STATE: WorkspaceState = {
   invites: [],
   loadedMembers: false,
   syncing: false,
-  showInviteForm: false,
+  busyMemberIds: [],
+  inviteActionState: {},
 };
 
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [wsStates, setWsStates] = useState<Record<string, WorkspaceState>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastState[]>([]);
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
@@ -46,11 +57,10 @@ export default function DashboardPage() {
   const loadWorkspaces = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
       const data = await getWorkspaces();
       setWorkspaces(data);
     } catch {
-      setError("Không thể tải danh sách workspace. Hãy kiểm tra backend đã chạy chưa.");
+      showToast("Không thể tải workspace", "Hãy kiểm tra backend đang chạy và thử tải lại dashboard.", "error");
     } finally {
       setLoading(false);
     }
@@ -61,11 +71,28 @@ export default function DashboardPage() {
     loadWorkspaces();
   }, [loadWorkspaces]);
 
-  function updateWsState(orgId: string, patch: Partial<WorkspaceState>) {
-    setWsStates((prev) => ({
-      ...prev,
-      [orgId]: { ...(prev[orgId] ?? DEFAULT_WS_STATE), ...patch },
-    }));
+  function updateWsState(orgId: string, patch: Partial<WorkspaceState> | ((current: WorkspaceState) => Partial<WorkspaceState>)) {
+    setWsStates((prev) => {
+      const current = prev[orgId] ?? DEFAULT_WS_STATE;
+      const nextPatch = typeof patch === "function" ? patch(current) : patch;
+
+      return {
+        ...prev,
+        [orgId]: { ...current, ...nextPatch },
+      };
+    });
+  }
+
+  function showToast(
+    title: string,
+    message: string,
+    tone: ToastState["tone"] = "info"
+  ) {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, title, message, tone }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 3600);
   }
 
   async function loadMembers(orgId: string) {
@@ -83,7 +110,7 @@ export default function DashboardPage() {
         ]);
         updateWsState(orgId, { members, invites, loadedMembers: true });
       } catch {
-        setError(`Không thể tải dữ liệu workspace ${orgId}`);
+        showToast("Không thể tải dữ liệu workspace", `Workspace ${orgId} hiện chưa đọc được members hoặc invites.`, "error");
       } finally {
         updateWsState(orgId, { syncing: false });
         inflightMemberLoads.current.delete(orgId);
@@ -100,19 +127,76 @@ export default function DashboardPage() {
     try {
       await syncWorkspace(orgId);
       await loadMembers(orgId);
-      await loadWorkspaces(); // cập nhật member_count
+      await loadWorkspaces();
+      showToast("Đồng bộ hoàn tất", `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`, "success");
     } catch {
-      setError(`Sync thất bại cho workspace ${orgId}. Token có thể đã hết hạn.`);
+      showToast("Sync thất bại", `Workspace ${orgId} chưa thể đồng bộ. Token có thể đã hết hạn.`, "error");
       updateWsState(orgId, { syncing: false });
     }
   }
 
   async function handleKick(orgId: string, memberId: number) {
+    updateWsState(orgId, (current) => ({
+      busyMemberIds: [...current.busyMemberIds, memberId],
+    }));
+
     try {
       await kickMember({ org_id: orgId, member_id: memberId });
       await loadMembers(orgId);
+      await loadWorkspaces();
+      showToast("Đã xóa thành viên", "Thành viên đã được gỡ khỏi workspace thành công.", "success");
     } catch {
-      setError("Không thể xóa thành viên.");
+      showToast("Không thể xóa thành viên", "Hãy thử lại sau hoặc kiểm tra quyền owner/admin hiện tại.", "error");
+    } finally {
+      updateWsState(orgId, (current) => ({
+        busyMemberIds: current.busyMemberIds.filter((id) => id !== memberId),
+      }));
+    }
+  }
+
+  async function handleResendInvite(orgId: string, inviteId: string) {
+    updateWsState(orgId, (current) => ({
+      inviteActionState: { ...current.inviteActionState, [inviteId]: "resend" },
+    }));
+
+    try {
+      await resendInvite({ org_id: orgId, invite_id: inviteId });
+      await loadMembers(orgId);
+      showToast("Đã gửi lại lời mời", "Lời mời đã được gửi lại cho thành viên và dashboard đã cập nhật.", "success");
+    } catch {
+      showToast("Gửi lại thất bại", "Không thể resend lời mời ở thời điểm này.", "error");
+    } finally {
+      updateWsState(orgId, (current) => {
+        const next = { ...current.inviteActionState };
+        delete next[inviteId];
+        return { inviteActionState: next };
+      });
+    }
+  }
+
+  async function handleRevokeInvite(orgId: string, inviteId: string) {
+    const previousInvites = wsStates[orgId]?.invites ?? [];
+
+    updateWsState(orgId, (current) => ({
+      invites: current.invites.filter((invite) => invite.invite_id !== inviteId),
+      inviteActionState: { ...current.inviteActionState, [inviteId]: "revoke" },
+    }));
+
+    try {
+      await cancelInvite({ org_id: orgId, invite_id: inviteId });
+      showToast("Đã thu hồi lời mời", "Invite đã được revoke và dashboard đã cập nhật ngay lập tức.", "success");
+    } catch {
+      updateWsState(orgId, {
+        invites: previousInvites,
+      });
+      showToast("Thu hồi thất bại", "Không thể revoke lời mời này. Hãy thử lại sau.", "error");
+    } finally {
+      updateWsState(orgId, (current) => {
+        const next = { ...current.inviteActionState };
+        delete next[inviteId];
+        return { inviteActionState: next };
+      });
+      void loadWorkspaces();
     }
   }
 
@@ -124,7 +208,7 @@ export default function DashboardPage() {
       await loadWorkspaces();
       setDeletingWs(null);
     } catch {
-      setError(`Không thể xóa workspace ${deletingWs.name}`);
+      showToast("Không thể xóa workspace", `Workspace ${deletingWs.name} chưa thể xóa ở thời điểm này.`, "error");
     } finally {
       setDeleting(false);
     }
@@ -165,12 +249,7 @@ export default function DashboardPage() {
         syncErrors={0}
       />
 
-      {error && (
-        <div role="alert" aria-live="polite" className="error-banner">
-          {error}
-          <button onClick={() => setError(null)} className="error-dismiss">✕</button>
-        </div>
-      )}
+
 
       {loading && (
         <div className="loading-state">
@@ -213,12 +292,6 @@ export default function DashboardPage() {
               syncing={state.syncing}
               onSync={() => handleSync(ws.org_id)}
               onDelete={() => setDeletingWs(ws)}
-              onInvite={() => {
-                updateWsState(ws.org_id, {
-                  showInviteForm: !state.showInviteForm,
-                  loadedMembers: state.loadedMembers,
-                });
-              }}
               onExpandedChange={(expanded) => {
                 if (expanded && !state.loadedMembers && (Boolean(ws.last_sync) || ws.member_count > 0) && !state.syncing) {
                   void loadMembers(ws.org_id);
@@ -265,25 +338,33 @@ export default function DashboardPage() {
                       <div className="workspace-primary-column">
                         <MemberTable
                           members={state.members}
+                          busyMemberIds={state.busyMemberIds}
                           onKick={ws.can_manage_members ? (memberId) => handleKick(ws.org_id, memberId) : undefined}
                         />
                       </div>
 
                       <div className="workspace-side-column">
-                        {state.showInviteForm && (
-                          <div className="section-panel invite-section-panel">
-                            <InvitePanel
-                              orgId={ws.org_id}
-                              onDone={() => loadMembers(ws.org_id)}
-                            />
-                          </div>
-                        )}
+                        <div className="section-panel invite-section-panel">
+                          <InvitePanel
+                            orgId={ws.org_id}
+                            onDone={() => loadMembers(ws.org_id)}
+                          />
+                        </div>
 
-                        {state.invites.length > 0 && (
-                          <div className="section-panel invite-section-panel">
-                            <InviteList invites={state.invites} />
-                          </div>
-                        )}
+                        {(() => {
+                          const pendingInvites = state.invites.filter((invite) => invite.status === "pending");
+
+                          return pendingInvites.length > 0 ? (
+                            <div className="section-panel invite-section-panel">
+                              <InviteList
+                                invites={pendingInvites}
+                                busyInviteActions={state.inviteActionState}
+                                onResend={ws.can_manage_members ? (inviteId) => handleResendInvite(ws.org_id, inviteId) : undefined}
+                                onRevoke={ws.can_manage_members ? (inviteId) => handleRevokeInvite(ws.org_id, inviteId) : undefined}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
                   )}
@@ -314,24 +395,34 @@ export default function DashboardPage() {
               trong tool sẽ bị xóa (không ảnh hưởng tới tài khoản gốc trên ChatGPT).
             </p>
             <div className="confirm-actions">
-              <button 
-                className="btn btn-ghost" 
-                onClick={() => setDeletingWs(null)}
-                disabled={deleting}
-              >
+              <button className="btn btn-ghost" onClick={() => setDeletingWs(null)} disabled={deleting}>
                 Hủy
               </button>
-              <button 
-                className="btn btn-danger" 
-                onClick={handleConfirmDelete}
-                disabled={deleting}
-              >
-                {deleting ? "Đang xóa..." : "Xác nhận xóa"}
+              <button className="btn btn-danger" onClick={handleConfirmDelete} disabled={deleting}>
+                {deleting ? "Đang xóa..." : "Xóa workspace"}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast-item toast-${toast.tone}`} role="status">
+            <div className="toast-accent" aria-hidden="true">
+              {toast.tone === "success" ? "✓" : toast.tone === "error" ? "!" : "i"}
+            </div>
+            <div className="toast-copy">
+              <strong className="toast-title">{toast.title}</strong>
+              <span className="toast-message">{toast.message}</span>
+            </div>
+            <button className="toast-close" onClick={() => setToasts((prev) => prev.filter((item) => item.id !== toast.id))}>
+              ✕
+            </button>
+            <span className="toast-progress" aria-hidden="true" />
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

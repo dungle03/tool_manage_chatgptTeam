@@ -277,11 +277,22 @@ class ChatGPTService:
 
     def extract_email(self, access_token: str) -> str | None:
         claims = self.decode_access_token_claims(access_token)
-        return claims.get("email")
+        auth_claims = claims.get("https://api.openai.com/auth") or {}
+        return (
+            claims.get("email")
+            or claims.get("https://auth.openai.com/email")
+            or auth_claims.get("email")
+        )
 
     def extract_user_id(self, access_token: str) -> str | None:
         claims = self.decode_access_token_claims(access_token)
-        return claims.get("sub") or claims.get("user_id")
+        auth_claims = claims.get("https://api.openai.com/auth") or {}
+        return (
+            auth_claims.get("chatgpt_user_id")
+            or auth_claims.get("user_id")
+            or claims.get("user_id")
+            or claims.get("sub")
+        )
 
 
 chatgpt_service = ChatGPTService()

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -88,25 +89,43 @@ def _normalize_member_role(item: dict) -> str:
     return "user"
 
 
+def _normalize_identity(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized or None
+
+
 def _get_current_user_role(workspace: Workspace, session: Session) -> str:
     if not workspace.access_token:
         return "user"
 
-    email = chatgpt_service.extract_email(workspace.access_token)
-    if not email:
-        return "user"
+    token_user_id = _normalize_identity(
+        chatgpt_service.extract_user_id(workspace.access_token)
+    )
+    token_email = _normalize_identity(
+        chatgpt_service.extract_email(workspace.access_token)
+    )
 
-    member = session.execute(
-        select(Member).where(
-            Member.org_id == workspace.org_id,
-            Member.email == email,
-        )
-    ).scalar_one_or_none()
+    members = (
+        session.execute(select(Member).where(Member.org_id == workspace.org_id))
+        .scalars()
+        .all()
+    )
 
-    if not member:
-        return "user"
+    if token_user_id:
+        for member in members:
+            remote_id = _normalize_identity(member.remote_id)
+            if remote_id and remote_id == token_user_id:
+                return member.role.lower()
 
-    return member.role.lower()
+    if token_email:
+        for member in members:
+            member_email = _normalize_identity(member.email)
+            if member_email and member_email == token_email:
+                return member.role.lower()
+
+    return "user"
 
 
 async def _resolve_access_token(workspace: Workspace) -> str:
@@ -137,13 +156,23 @@ async def _resolve_access_token(workspace: Workspace) -> str:
 
 
 @router.get("/api/workspaces")
-def get_workspaces(
+async def get_workspaces(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
     rows = session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
     response = []
+    tokens_updated = False
+
     for row in rows:
+        try:
+            previous_access_token = row.access_token
+            resolved_access_token = await _resolve_access_token(row)
+            if resolved_access_token != previous_access_token:
+                tokens_updated = True
+        except Exception:
+            pass
+
         current_user_role = _get_current_user_role(row, session)
         response.append(
             {
@@ -161,6 +190,10 @@ def get_workspaces(
                 "can_manage_members": current_user_role in ("owner", "admin"),
             }
         )
+
+    if tokens_updated:
+        session.commit()
+
     return response
 
 
@@ -364,3 +397,23 @@ async def sync_workspace(
         "invites_synced": len(remote_invites),
         "last_sync": _serialize_datetime(workspace.last_sync),
     }
+
+
+@router.delete("/api/workspaces/{id}")
+def delete_workspace(
+    id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    session.query(Member).where(Member.org_id == workspace.org_id).delete()
+    session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
+    session.delete(workspace)
+    session.commit()
+
+    return {"ok": True, "deleted_org_id": id}
