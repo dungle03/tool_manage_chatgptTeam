@@ -2,10 +2,11 @@ from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Invite
+from app.models import Invite, Member
 
 router = APIRouter()
 
@@ -31,5 +32,16 @@ def invite_member(payload: dict, session: Session = Depends(get_session)):
 
 
 @router.delete("/api/member")
-def delete_member(payload: dict):
-    return {"ok": True, "payload": payload}
+def delete_member(payload: dict, session: Session = Depends(get_session)):
+    org_id = payload.get("org_id")
+    member_id = payload.get("member_id")
+    row = session.execute(
+        select(Member).where(Member.org_id == org_id, Member.id == member_id)
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="member not found")
+    if row.role.lower() == "owner":
+        raise HTTPException(status_code=409, detail="cannot remove owner")
+    row.status = "removed"
+    session.commit()
+    return {"ok": True, "member_id": row.id, "status": row.status}
