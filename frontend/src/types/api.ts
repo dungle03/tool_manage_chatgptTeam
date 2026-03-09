@@ -9,6 +9,8 @@ export type Workspace = {
   expires_at: string | null;
   last_sync: string | null;
   created_at: string;
+  current_user_role: string;
+  can_manage_members: boolean;
 };
 
 export type Member = {

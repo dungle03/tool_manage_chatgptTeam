@@ -24,6 +24,91 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
         return None
 
 
+def _serialize_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
+def _normalize_member_role(item: dict) -> str:
+    raw_values = [
+        item.get("role"),
+        item.get("role_name"),
+        item.get("account_type"),
+        item.get("membership_role"),
+        item.get("workspace_role"),
+        item.get("type"),
+    ]
+
+    normalized_values = [
+        str(value).strip().lower().replace("_", "-")
+        for value in raw_values
+        if value not in (None, "")
+    ]
+
+    owner_tokens = {
+        "owner",
+        "primary-owner",
+        "primary-owner-user",
+        "primary",
+        "plan-owner",
+        "plan-owner-user",
+        "workspace-owner",
+        "team-owner",
+    }
+    admin_tokens = {
+        "admin",
+        "workspace-admin",
+        "team-admin",
+        "operator",
+        "manager",
+    }
+    user_tokens = {
+        "member",
+        "user",
+        "standard-user",
+        "standard-member",
+        "workspace-user",
+        "team-user",
+        "regular-user",
+    }
+
+    for value in normalized_values:
+        if value in owner_tokens or "owner" in value:
+            return "owner"
+        if value in admin_tokens or value.endswith("-admin") or "admin" in value:
+            return "admin"
+        if value in user_tokens or "user" in value or "member" in value:
+            return "user"
+
+    return "user"
+
+
+def _get_current_user_role(workspace: Workspace, session: Session) -> str:
+    if not workspace.access_token:
+        return "user"
+
+    email = chatgpt_service.extract_email(workspace.access_token)
+    if not email:
+        return "user"
+
+    member = session.execute(
+        select(Member).where(
+            Member.org_id == workspace.org_id,
+            Member.email == email,
+        )
+    ).scalar_one_or_none()
+
+    if not member:
+        return "user"
+
+    return member.role.lower()
+
+
 async def _resolve_access_token(workspace: Workspace) -> str:
     account_id = workspace.account_id or workspace.org_id
 
@@ -57,21 +142,26 @@ def get_workspaces(
     _token: str = Depends(verify_admin_token),
 ):
     rows = session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
-    return [
-        {
-            "id": row.id,
-            "org_id": row.org_id,
-            "account_id": row.account_id,
-            "name": row.name,
-            "status": row.status,
-            "member_count": row.member_count,
-            "member_limit": row.member_limit,
-            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
-            "last_sync": row.last_sync.isoformat() if row.last_sync else None,
-            "created_at": row.created_at.isoformat(),
-        }
-        for row in rows
-    ]
+    response = []
+    for row in rows:
+        current_user_role = _get_current_user_role(row, session)
+        response.append(
+            {
+                "id": row.id,
+                "org_id": row.org_id,
+                "account_id": row.account_id,
+                "name": row.name,
+                "status": row.status,
+                "member_count": row.member_count,
+                "member_limit": row.member_limit,
+                "expires_at": _serialize_datetime(row.expires_at),
+                "last_sync": _serialize_datetime(row.last_sync),
+                "created_at": _serialize_datetime(row.created_at),
+                "current_user_role": current_user_role,
+                "can_manage_members": current_user_role in ("owner", "admin"),
+            }
+        )
+    return response
 
 
 @router.post("/api/teams/import")
@@ -185,8 +275,8 @@ def get_workspace_members(
             "email": row.email,
             "role": row.role,
             "status": row.status,
-            "invite_date": row.invite_date.isoformat() if row.invite_date else None,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "invite_date": _serialize_datetime(row.invite_date),
+            "created_at": _serialize_datetime(row.created_at),
             "picture": row.picture,
         }
         for row in rows
@@ -229,20 +319,7 @@ async def sync_workspace(
 
     for item in remote_members:
         created = _parse_datetime(item.get("created") or item.get("created_at"))
-
-        # Normalize role — ChatGPT API returns various strings
-        raw_role = (
-            item.get("role")
-            or item.get("role_name")
-            or item.get("account_type")
-            or "member"
-        ).lower()
-        if raw_role in ("owner", "primary-owner", "primary", "plan_owner"):
-            role = "owner"
-        elif raw_role in ("admin", "operator"):
-            role = "admin"
-        else:
-            role = "member"
+        role = _normalize_member_role(item)
 
         session.add(
             Member(
@@ -283,5 +360,5 @@ async def sync_workspace(
         "ok": True,
         "members_synced": len(remote_members),
         "invites_synced": len(remote_invites),
-        "last_sync": workspace.last_sync.isoformat(),
+        "last_sync": _serialize_datetime(workspace.last_sync),
     }

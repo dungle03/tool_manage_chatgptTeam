@@ -3,49 +3,40 @@
 import { useState } from "react";
 import type { Member } from "@/types/api";
 
-function roleLabel(role: string): string {
+function roleTone(role: string) {
   switch (role.toLowerCase()) {
-    case "owner": return "👑 Owner";
-    case "admin": return "🛡️ Admin";
-    case "pending": return "⏳ Pending";
-    default: return "👤 User";
+    case "owner":
+      return { label: "Owner", className: "role-owner" };
+    case "admin":
+      return { label: "Admin", className: "role-admin" };
+    case "user":
+    case "member":
+    default:
+      return { label: "User", className: "role-user" };
   }
 }
 
-function formatDate(dateStr?: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  return `${d.getDate()}/${d.getMonth() + 1}`;
+function initialsOf(name: string, email: string): string {
+  const source = name?.trim() || email.trim();
+  return (
+    source
+      .split(/[\s@._-]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "U"
+  );
 }
 
 export function MemberTable({
   members,
   onKick,
-  onCancelInvite,
 }: {
   members: Member[];
   onKick?: (memberId: number) => Promise<void>;
-  onCancelInvite?: (email: string) => Promise<void>;
 }) {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [target, setTarget] = useState<Member | null>(null);
   const [kicking, setKicking] = useState(false);
-
-  function toggleAll() {
-    if (selected.size === members.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(members.map((m) => m.id)));
-    }
-  }
-
-  function toggleRow(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
 
   async function handleConfirmKick() {
     if (!target || !onKick) return;
@@ -60,112 +51,85 @@ export function MemberTable({
 
   if (members.length === 0) {
     return (
-      <div className="empty-state">
+      <div className="empty-state compact-empty-state">
         <div className="empty-icon">👥</div>
-        <p>Chưa có thành viên nào. Mời ai đó để bắt đầu!</p>
+        <p>Workspace này chưa có thành viên nào.</p>
       </div>
     );
   }
 
   return (
     <>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th style={{ width: "36px" }}>
-              <input
-                type="checkbox"
-                checked={selected.size === members.length}
-                onChange={toggleAll}
-                aria-label="Chọn tất cả"
-              />
-            </th>
-            <th style={{ width: "36px" }}>#</th>
-            <th>EMAIL</th>
-            <th>TÊN TÀI KHOẢN</th>
-            <th>VAI TRÒ</th>
-            <th>NGÀY MỜI</th>
-            <th>HÀNH ĐỘNG</th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.map((m, idx) => {
-            const isPending = m.status === "pending" || m.status === "invited";
-            const isOwner = m.role.toLowerCase() === "owner";
+      <div className="table-shell">
+        <div className="section-heading-row">
+          <div>
+            <h3 className="section-heading">Members</h3>
+            <p className="section-description">Danh sách thành viên hiện tại của workspace.</p>
+          </div>
+          <div className="section-count">{members.length} người</div>
+        </div>
 
-            return (
-              <tr key={m.id} className={selected.has(m.id) ? "selected-row" : ""}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(m.id)}
-                    onChange={() => toggleRow(m.id)}
-                    aria-label={`Chọn ${m.email}`}
-                  />
-                </td>
-                <td style={{ opacity: 0.5, fontSize: "12px" }}>{idx + 1}</td>
-                <td>
-                  <span
-                    style={{
-                      color: isPending ? "var(--text-secondary)" : "var(--accent)",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {m.email}
-                  </span>
-                </td>
-                <td style={{ fontSize: "13px" }}>{m.name || "—"}</td>
-                <td>
-                  <span style={{ fontSize: "13px" }}>
-                    {isPending ? "⏳ Pending" : roleLabel(m.role)}
-                  </span>
-                </td>
-                <td style={{ fontSize: "12px", opacity: 0.7 }}>
-                  {formatDate(m.invite_date)}
-                </td>
-                <td>
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    {isPending && onCancelInvite && (
-                      <button
-                        className="btn btn-danger"
-                        style={{ fontSize: "12px", padding: "3px 10px" }}
-                        onClick={() => onCancelInvite(m.email)}
-                      >
-                        Hủy
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th className="table-action-head">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => {
+              const isOwner = member.role.toLowerCase() === "owner";
+              const role = roleTone(member.role);
+              const displayName = member.name || "No name";
+
+              return (
+                <tr key={member.id}>
+                  <td>
+                    <div className="member-cell">
+                      <div className="member-avatar">{initialsOf(member.name, member.email)}</div>
+                      <div className="member-info">
+                        <div className="member-name">{displayName}</div>
+                        <div className="member-subtle">ID: {member.remote_id || member.id}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="member-email">{member.email}</span>
+                  </td>
+                  <td>
+                    <span className={`role-pill ${role.className}`}>{role.label}</span>
+                  </td>
+                  <td className="table-action-cell">
+                    {isOwner || !onKick ? (
+                      <span className="muted-inline">Protected</span>
+                    ) : (
+                      <button className="action-btn action-btn-kick" onClick={() => setTarget(member)}>
+                        Kick
                       </button>
                     )}
-                    {!isPending && !isOwner && onKick && (
-                      <button
-                        className="btn btn-danger"
-                        style={{ fontSize: "12px", padding: "3px 10px" }}
-                        onClick={() => setTarget(m)}
-                      >
-                        Xóa
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
-      {/* Confirm Modal */}
       {target && (
         <div className="confirm-overlay" onClick={() => setTarget(null)}>
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h4>⚠️ Xác nhận xóa thành viên</h4>
+            <h4>Xác nhận xóa thành viên</h4>
             <p>
-              Bạn có chắc muốn xóa <strong>{target.name || target.email}</strong> (
-              {target.email}) khỏi workspace? Hành động này không thể hoàn tác.
+              Bạn có chắc muốn xóa <strong>{target.name || target.email}</strong> khỏi workspace không?
             </p>
             <div className="confirm-actions">
               <button className="btn btn-ghost" onClick={() => setTarget(null)}>
                 Hủy
               </button>
               <button className="btn btn-danger" onClick={handleConfirmKick} disabled={kicking}>
-                {kicking ? "Đang xóa..." : "Xác nhận xóa"}
+                {kicking ? "Đang xóa..." : "Xóa thành viên"}
               </button>
             </div>
           </div>

@@ -48,12 +48,44 @@ export default function DashboardPage() {
       setError(null);
       const data = await getWorkspaces();
       setWorkspaces(data);
+
+      const cachedWorkspaces = data.filter((ws) => Boolean(ws.last_sync) || ws.member_count > 0);
+      if (cachedWorkspaces.length === 0) return;
+
+      const hydrated = await Promise.all(
+        cachedWorkspaces.map(async (ws) => {
+          try {
+            const [members, invites] = await Promise.all([
+              getWorkspaceMembers(ws.org_id),
+              listInvites(ws.org_id).catch(() => [] as Invite[]),
+            ]);
+            return { orgId: ws.org_id, members, invites, ok: true as const };
+          } catch {
+            return { orgId: ws.org_id, members: [] as Member[], invites: [] as Invite[], ok: false as const };
+          }
+        })
+      );
+
+      setWsStates((prev) => {
+        const next = { ...prev };
+        for (const item of hydrated) {
+          if (!item.ok) continue;
+          next[item.orgId] = {
+            ...(prev[item.orgId] ?? DEFAULT_WS_STATE),
+            members: item.members,
+            invites: item.invites,
+            loadedMembers: true,
+          };
+        }
+        return next;
+      });
     } catch {
       setError("Không thể tải danh sách workspace. Hãy kiểm tra backend đã chạy chưa.");
     } finally {
       setLoading(false);
     }
   }, []);
+
 
   useEffect(() => {
     loadWorkspaces();
@@ -125,17 +157,22 @@ export default function DashboardPage() {
   return (
     <main className="dashboard-layout">
       <div className="dashboard-header">
-        <div>
-          <h1 className="dashboard-title">🏢 ChatGPT Team Manager</h1>
-          <p className="dashboard-subtitle">Quản lý workspace và thành viên</p>
+        <div className="dashboard-header-copy">
+          <span className="eyebrow">Workspace control center</span>
+          <h1 className="dashboard-title">ChatGPT Team Manager</h1>
+          <p className="dashboard-subtitle">
+            Theo dõi workspace, quản lý thành viên và xử lý lời mời trong một dashboard rõ ràng hơn.
+          </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowImport(true)}
-          id="import-team-btn"
-        >
-          + Thêm Team
-        </button>
+        <div className="dashboard-header-actions">
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowImport(true)}
+            id="import-team-btn"
+          >
+            + Import Team
+          </button>
+        </div>
       </div>
 
       <DashboardSummary
@@ -160,9 +197,17 @@ export default function DashboardPage() {
       )}
 
       {!loading && workspaces.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">🏢</div>
-          <p>Chưa có workspace nào. Nhấn <strong>+ Thêm Team</strong> để import từ ChatGPT.</p>
+        <div className="empty-state hero-empty-state">
+          <div className="empty-icon">◫</div>
+          <div className="empty-copy">
+            <h3>Chưa có workspace nào</h3>
+            <p>
+              Import team đầu tiên để bắt đầu quản lý member, lời mời và trạng thái đồng bộ từ ChatGPT.
+            </p>
+          </div>
+          <button className="btn btn-primary" onClick={() => setShowImport(true)}>
+            Import workspace đầu tiên
+          </button>
         </div>
       )}
 
@@ -195,44 +240,52 @@ export default function DashboardPage() {
               expandedContent={
                 <div className="workspace-detail">
                   {!state.loadedMembers ? (
-                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => handleSync(ws.org_id)}
-                        disabled={state.syncing}
-                      >
-                        {state.syncing ? "⏳ Đang sync..." : "↺ Sync từ ChatGPT"}
-                      </button>
-                      <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                        Chưa tải dữ liệu. Nhấn Sync để lấy danh sách từ ChatGPT.
-                      </span>
+                    <div className="section-panel section-panel-center">
+                      <div className="section-heading-row compact-heading-row">
+                        <div>
+                          <h3 className="section-heading">Workspace data chưa được tải</h3>
+                          <p className="section-description">
+                            Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT.
+                          </p>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => handleSync(ws.org_id)}
+                          disabled={state.syncing}
+                        >
+                          {state.syncing ? "Đang sync..." : "Sync workspace"}
+                        </button>
+                        <span className="workspace-helper-copy">Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.</span>
+                      </div>
                     </div>
                   ) : (
-                    <>
-                      <MemberTable
-                        members={state.members}
-                        onKick={(memberId) => handleKick(ws.org_id, memberId)}
-                      />
+                    <div className="workspace-sections-grid">
+                      <div className="workspace-primary-column">
+                        <MemberTable
+                          members={state.members}
+                          onKick={ws.can_manage_members ? (memberId) => handleKick(ws.org_id, memberId) : undefined}
+                        />
+                      </div>
 
-                      {state.showInviteForm && (
-                        <div className="section-panel">
-                          <h3 className="section-title">📩 Mời thành viên mới</h3>
-                          <InvitePanel
-                            orgId={ws.org_id}
-                            onDone={() => loadMembers(ws.org_id)}
-                          />
-                        </div>
-                      )}
+                      <div className="workspace-side-column">
+                        {state.showInviteForm && (
+                          <div className="section-panel invite-section-panel">
+                            <InvitePanel
+                              orgId={ws.org_id}
+                              onDone={() => loadMembers(ws.org_id)}
+                            />
+                          </div>
+                        )}
 
-                      {state.invites.length > 0 && (
-                        <div className="section-panel">
-                          <h3 className="section-title">
-                            ⏳ Lời mời đang chờ ({state.invites.length})
-                          </h3>
-                          <InviteList invites={state.invites} />
-                        </div>
-                      )}
-                    </>
+                        {state.invites.length > 0 && (
+                          <div className="section-panel invite-section-panel">
+                            <InviteList invites={state.invites} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               }

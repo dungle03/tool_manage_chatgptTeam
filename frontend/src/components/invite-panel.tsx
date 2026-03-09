@@ -18,9 +18,11 @@ export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim()) return;
+
     setSending(true);
     setError(null);
     setSuccess(false);
+
     try {
       await inviteMember({ org_id: orgId, email: email.trim(), role });
       setEmail("");
@@ -36,61 +38,45 @@ export function InvitePanel({ orgId, onDone }: InvitePanelProps) {
   }
 
   return (
-    <form className="invite-form" onSubmit={handleSubmit}>
-      <div className="form-group" style={{ flex: 2 }}>
-        <label className="form-label">Địa chỉ email</label>
-        <input
-          className="input"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="user@company.com"
-          type="email"
-          required
-        />
+    <form className="invite-form-card" onSubmit={handleSubmit}>
+      <div className="section-heading-row compact-heading-row">
+        <div>
+          <h3 className="section-heading">Invite a new member</h3>
+          <p className="section-description">Nhập email và phân quyền trước khi gửi lời mời.</p>
+        </div>
       </div>
-      <div className="form-group">
-        <label className="form-label">Vai trò</label>
-        <select
-          className="select"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        >
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
-        </select>
+
+      <div className="invite-form-grid">
+        <div className="form-group">
+          <label className="form-label">Email</label>
+          <input
+            className="input"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="name@company.com"
+            type="email"
+            required
+            id={`invite-email-${orgId}`}
+          />
+        </div>
+
+        <div className="form-group form-group-narrow">
+          <label className="form-label">Role</label>
+          <select className="select" value={role} onChange={(e) => setRole(e.target.value)} id={`invite-role-${orgId}`}>
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+
+        <div className="invite-submit-wrap">
+          <button className="btn btn-primary invite-submit-btn" type="submit" disabled={sending} id={`invite-submit-${orgId}`}>
+            {sending ? "Sending..." : "Send invite"}
+          </button>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-        <button
-          className="btn btn-primary"
-          type="submit"
-          disabled={sending}
-          style={{ whiteSpace: "nowrap" }}
-        >
-          {sending ? "Đang gửi..." : "📩 Gửi lời mời"}
-        </button>
-        {success && (
-          <span
-            style={{
-              fontSize: "12px",
-              color: "var(--success)",
-              textAlign: "center",
-            }}
-          >
-            ✅ Đã gửi!
-          </span>
-        )}
-        {error && (
-          <span
-            style={{
-              fontSize: "12px",
-              color: "var(--danger)",
-              textAlign: "center",
-            }}
-          >
-            ⚠️ {error}
-          </span>
-        )}
-      </div>
+
+      {success && <div className="inline-feedback success-feedback">Đã gửi lời mời thành công.</div>}
+      {error && <div className="inline-feedback error-feedback">{error}</div>}
     </form>
   );
 }
