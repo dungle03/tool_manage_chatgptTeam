@@ -6,6 +6,7 @@ import { WorkspaceCard } from "@/components/workspace-card";
 import { MemberTable } from "@/components/member-table";
 import { InvitePanel } from "@/components/invite-panel";
 import { InviteList } from "@/components/invite-list";
+import { ImportDialog } from "@/components/import-dialog";
 import {
   getWorkspaces,
   getWorkspaceMembers,
@@ -26,6 +27,7 @@ export default function DashboardPage() {
   const [wsStates, setWsStates] = useState<Record<string, WorkspaceState>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showImport, setShowImport] = useState(false);
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -90,9 +92,19 @@ export default function DashboardPage() {
   return (
     <main className="dashboard-layout">
       <div className="dashboard-header">
-        <h1 className="dashboard-title">🏢 ChatGPT Team Manager</h1>
-        <p className="dashboard-subtitle">Quản lý workspace và thành viên</p>
+        <div>
+          <h1 className="dashboard-title">🏢 ChatGPT Team Manager</h1>
+          <p className="dashboard-subtitle">Quản lý workspace và thành viên</p>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowImport(true)}
+          id="import-team-btn"
+        >
+          + Thêm Team
+        </button>
       </div>
+
 
       <DashboardSummary
         totalTeams={workspaces.length}
@@ -177,6 +189,16 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {showImport && (
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onImported={(orgId) => {
+            setShowImport(false);
+            loadWorkspaces();
+          }}
+        />
+      )}
     </main>
   );
 }

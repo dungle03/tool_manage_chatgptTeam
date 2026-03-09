@@ -36,6 +36,15 @@ export async function syncWorkspace(orgId: string) {
   return requestJson(`/api/workspaces/${orgId}/sync`, "GET");
 }
 
+export async function importTeam(payload: {
+  access_token?: string;
+  session_token?: string;
+  org_id?: string;
+  name?: string;
+}) {
+  return requestJson("/api/teams/import", "POST", payload);
+}
+
 async function requestJson(url: string, method: string, body?: unknown) {
   const res = await fetch(url, {
     method,
