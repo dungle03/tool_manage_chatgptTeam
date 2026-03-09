@@ -13,6 +13,7 @@ import {
   kickMember,
   listInvites,
   syncWorkspace,
+  deleteWorkspace,
 } from "@/lib/api";
 import type { Workspace, Member, Invite } from "@/types/api";
 
@@ -38,6 +39,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -95,6 +98,20 @@ export default function DashboardPage() {
       await loadMembers(orgId);
     } catch {
       setError("Không thể xóa thành viên.");
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deletingWs) return;
+    setDeleting(true);
+    try {
+      await deleteWorkspace(deletingWs.org_id);
+      await loadWorkspaces();
+      setDeletingWs(null);
+    } catch {
+      setError(`Không thể xóa workspace ${deletingWs.name}`);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -167,6 +184,7 @@ export default function DashboardPage() {
               lastSync={ws.last_sync}
               syncing={state.syncing}
               onSync={() => handleSync(ws.org_id)}
+              onDelete={() => setDeletingWs(ws)}
               onInvite={() => {
                 // Toggle inline invite form
                 updateWsState(ws.org_id, {
@@ -231,6 +249,35 @@ export default function DashboardPage() {
             loadWorkspaces();
           }}
         />
+      )}
+
+      {/* Delete Workspace Confirmation Modal */}
+      {deletingWs && (
+        <div className="confirm-overlay" onClick={() => !deleting && setDeletingWs(null)}>
+          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h4>⚠️ Xác nhận xóa Workspace</h4>
+            <p>
+              Bạn có chắc muốn xóa <strong>{deletingWs.name}</strong> không? Các dữ liệu về member
+              trong tool sẽ bị xóa (không ảnh hưởng tới tài khoản gốc trên ChatGPT).
+            </p>
+            <div className="confirm-actions">
+              <button 
+                className="btn btn-ghost" 
+                onClick={() => setDeletingWs(null)}
+                disabled={deleting}
+              >
+                Hủy
+              </button>
+              <button 
+                className="btn btn-danger" 
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? "Đang xóa..." : "Xác nhận xóa"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

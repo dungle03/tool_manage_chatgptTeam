@@ -54,6 +54,10 @@ export async function cancelInvite(payload: { org_id: string; invite_id: string;
   return requestJson("/api/cancel-invite", "DELETE", payload);
 }
 
+export async function deleteWorkspace(orgId: string) {
+  return requestJson(`/api/workspaces/${orgId}`, "DELETE");
+}
+
 async function requestJson(url: string, method: string, body?: unknown) {
   const res = await fetch(url, {
     method,

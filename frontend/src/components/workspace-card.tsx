@@ -13,7 +13,6 @@ type WorkspaceCardProps = {
   expandedContent?: ReactNode;
   onSync?: () => void;
   onInvite?: () => void;
-  onEdit?: () => void;
   onDelete?: () => void;
 };
 
@@ -36,7 +35,6 @@ export function WorkspaceCard({
   expandedContent,
   onSync,
   onInvite,
-  onEdit,
   onDelete,
 }: WorkspaceCardProps) {
   const [expanded, setExpanded] = useState(selected ?? false);
@@ -91,36 +89,40 @@ export function WorkspaceCard({
           </span>
         </div>
 
-        {/* Toolbar */}
-        <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
           <button
-            onClick={onInvite}
+            onClick={(e) => {
+              e.stopPropagation();
+              onInvite?.();
+            }}
             title="Mời thành viên"
-            style={toolbarBtnStyle}
+            className="btn btn-secondary"
+            style={{ minWidth: 32, padding: "0 10px" }}
           >
             +
           </button>
           <button
-            onClick={onSync}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSync?.();
+            }}
             title="Sync"
             disabled={syncing}
-            style={{ ...toolbarBtnStyle, opacity: syncing ? 0.5 : 1 }}
+            className="btn btn-secondary"
+            style={{ minWidth: 32, padding: "0 10px", opacity: syncing ? 0.6 : 1 }}
           >
             <span style={{ display: "inline-block", animation: syncing ? "spin 1s linear infinite" : "none" }}>↺</span>
           </button>
           <button
-            onClick={onEdit}
-            title="Chỉnh sửa"
-            style={toolbarBtnStyle}
-          >
-            ✏️
-          </button>
-          <button
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete?.();
+            }}
             title="Xóa workspace"
-            style={{ ...toolbarBtnStyle, color: "var(--danger)" }}
+            className="btn btn-danger"
+            style={{ minWidth: 32, padding: "0 10px" }}
           >
-            🗑️
+            ✕
           </button>
         </div>
       </div>
@@ -135,13 +137,4 @@ export function WorkspaceCard({
   );
 }
 
-const toolbarBtnStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: "5px",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-  fontSize: "13px",
-  padding: "3px 8px",
-  lineHeight: 1,
-};
+
