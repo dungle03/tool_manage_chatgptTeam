@@ -18,7 +18,23 @@ def clean_db():
 def seed_data():
     session = SessionLocal()
     try:
-        workspace = Workspace(org_id="org_001", name="Team Alpha", member_limit=7)
+        workspace = Workspace(
+            org_id="org_001",
+            account_id="org_001",
+            name="Team Alpha",
+            member_limit=7,
+            member_count=2,
+            access_token="test-access-token",
+            session_token="test-session-token",
+        )
+        workspace_no_tokens = Workspace(
+            org_id="org_002",
+            account_id="org_002",
+            name="Team Without Tokens",
+            member_limit=7,
+            member_count=0,
+        )
+        session.add(workspace_no_tokens)
         session.add(workspace)
         session.flush()
 

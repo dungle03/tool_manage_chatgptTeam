@@ -5,3 +5,5 @@ pytest
 httpx
 uvicorn
 python-dotenv
+curl-cffi
+pyjwt

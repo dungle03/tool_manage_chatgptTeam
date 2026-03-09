@@ -28,8 +28,12 @@ export async function resendInvite(payload: { org_id: string; invite_id: string 
   return requestJson("/api/resend-invite", "POST", payload);
 }
 
-export async function cancelInvite(payload: { org_id: string; invite_id: string }) {
+export async function cancelInvite(payload: { org_id: string; invite_id: string; email?: string }) {
   return requestJson("/api/cancel-invite", "DELETE", payload);
+}
+
+export async function syncWorkspace(orgId: string) {
+  return requestJson(`/api/workspaces/${orgId}/sync`, "GET");
 }
 
 async function requestJson(url: string, method: string, body?: unknown) {
