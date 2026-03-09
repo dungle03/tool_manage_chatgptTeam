@@ -51,4 +51,5 @@ vitest_output.txt
 # Uploads
 uploads/
 
-# Logs
+# .brain folder
+.brain/
