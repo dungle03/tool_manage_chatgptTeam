@@ -6,6 +6,9 @@ export default function DashboardPage() {
     <main className="p-6 space-y-6">
       <DashboardSummary totalTeams={0} totalMembers={0} pendingInvites={0} syncErrors={0} />
       <WorkspaceCard title="No teams yet" members={0} memberLimit={0} status="synced" />
+      <div role="alert" aria-live="polite" className="text-sm text-red-600">
+        Errors will appear here.
+      </div>
     </main>
   );
 }
