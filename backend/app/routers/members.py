@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +13,7 @@ router = APIRouter()
 
 
 @router.delete("/api/member")
-def delete_member(
+async def delete_member(
     payload: KickMemberRequest,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -49,17 +47,15 @@ def delete_member(
         raise HTTPException(status_code=404, detail="workspace not found")
 
     account_id = workspace.account_id or workspace.org_id
-    access_token = _resolve_access_token(workspace)
+    access_token = await _resolve_access_token(workspace)
 
     remote_user_id = payload.user_id or row.remote_id
     if remote_user_id:
         try:
-            asyncio.run(
-                chatgpt_service.delete_member(
-                    access_token,
-                    account_id,
-                    remote_user_id,
-                )
+            await chatgpt_service.delete_member(
+                access_token,
+                account_id,
+                remote_user_id,
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,16 +24,14 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
         return None
 
 
-def _resolve_access_token(workspace: Workspace) -> str:
+async def _resolve_access_token(workspace: Workspace) -> str:
     account_id = workspace.account_id or workspace.org_id
 
     if workspace.session_token:
         try:
-            refreshed = asyncio.run(
-                chatgpt_service.refresh_access_token(
-                    workspace.session_token,
-                    account_id,
-                )
+            refreshed = await chatgpt_service.refresh_access_token(
+                workspace.session_token,
+                account_id,
             )
             workspace.access_token = refreshed["access_token"]
             workspace.session_token = (
@@ -78,7 +75,7 @@ def get_workspaces(
 
 
 @router.post("/api/teams/import")
-def import_team(
+async def import_team(
     payload: WorkspaceImportRequest,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -93,8 +90,8 @@ def import_team(
 
     if not access_token and session_token:
         try:
-            refreshed = asyncio.run(
-                chatgpt_service.refresh_access_token(session_token, payload.org_id)
+            refreshed = await chatgpt_service.refresh_access_token(
+                session_token, payload.org_id
             )
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -102,7 +99,7 @@ def import_team(
         session_token = refreshed.get("session_token") or session_token
 
     try:
-        accounts = asyncio.run(chatgpt_service.get_account_info(access_token))
+        accounts = await chatgpt_service.get_account_info(access_token)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -197,7 +194,7 @@ def get_workspace_members(
 
 
 @router.get("/api/workspaces/{id}/sync")
-def sync_workspace(
+async def sync_workspace(
     id: str,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -211,13 +208,9 @@ def sync_workspace(
     account_id = workspace.account_id or workspace.org_id
 
     try:
-        access_token = _resolve_access_token(workspace)
-        remote_members = asyncio.run(
-            chatgpt_service.get_members(access_token, account_id)
-        )
-        remote_invites = asyncio.run(
-            chatgpt_service.get_invites(access_token, account_id)
-        )
+        access_token = await _resolve_access_token(workspace)
+        remote_members = await chatgpt_service.get_members(access_token, account_id)
+        remote_invites = await chatgpt_service.get_invites(access_token, account_id)
     except HTTPException:
         raise
     except Exception as exc:

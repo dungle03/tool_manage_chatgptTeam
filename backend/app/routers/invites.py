@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -39,7 +38,7 @@ def get_invites(
 
 
 @router.post("/api/invite")
-def invite_member(
+async def invite_member(
     payload: InviteRequest,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -51,15 +50,13 @@ def invite_member(
         raise HTTPException(status_code=404, detail="workspace not found")
 
     account_id = workspace.account_id or workspace.org_id
-    access_token = _resolve_access_token(workspace)
+    access_token = await _resolve_access_token(workspace)
 
     try:
-        response = asyncio.run(
-            chatgpt_service.send_invite(
-                access_token,
-                account_id,
-                payload.email,
-            )
+        response = await chatgpt_service.send_invite(
+            access_token,
+            account_id,
+            payload.email,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -77,7 +74,7 @@ def invite_member(
 
 
 @router.post("/api/resend-invite")
-def resend_invite(
+async def resend_invite(
     payload: InviteActionRequest,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -97,11 +94,11 @@ def resend_invite(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    access_token = _resolve_access_token(workspace)
+    access_token = await _resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
 
     try:
-        asyncio.run(chatgpt_service.send_invite(access_token, account_id, row.email))
+        await chatgpt_service.send_invite(access_token, account_id, row.email)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -111,7 +108,7 @@ def resend_invite(
 
 
 @router.delete("/api/cancel-invite")
-def cancel_invite(
+async def cancel_invite(
     payload: InviteActionRequest,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
@@ -131,11 +128,11 @@ def cancel_invite(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    access_token = _resolve_access_token(workspace)
+    access_token = await _resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
 
     try:
-        asyncio.run(chatgpt_service.delete_invite(access_token, account_id, row.email))
+        await chatgpt_service.delete_invite(access_token, account_id, row.email)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
