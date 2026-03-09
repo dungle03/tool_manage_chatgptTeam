@@ -57,8 +57,22 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
 
       setStep("done");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Có lỗi xảy ra.";
-      setError(`Import thất bại: ${msg}`);
+      const rawMsg = err instanceof Error ? err.message : "Có lỗi xảy ra.";
+
+      // Dịch lỗi kỹ thuật sang tiếng thường
+      let friendlyMsg = rawMsg;
+      if (rawMsg.includes("ECONNREFUSED") || rawMsg.includes("fetch") || rawMsg.includes("Failed to fetch")) {
+        friendlyMsg = "Không kết nối được tới backend (port 8000). Hãy đảm bảo đã chạy: uvicorn app.main:app --reload";
+      } else if (rawMsg.includes("401")) {
+        friendlyMsg = "Token không hợp lệ hoặc hết hạn. Hãy lấy token mới từ chatgpt.com.";
+      } else if (rawMsg.includes("no team account found")) {
+        friendlyMsg = "Token này không có tài khoản ChatGPT Team. Hãy kiểm tra lại token có đúng của tài khoản Team không.";
+      } else if (rawMsg.includes("502")) {
+        friendlyMsg = "Backend không gọi được ChatGPT API. Token có thể đã hết hạn.";
+      }
+
+      setError(friendlyMsg);
+
     } finally {
       setLoading(false);
     }
