@@ -1,0 +1,29 @@
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class WorkspaceOut(BaseModel):
+    id: int
+    org_id: str
+    name: str
+    member_limit: int
+    created_at: datetime
+
+
+class MemberOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: str
+    status: str
+    invite_date: datetime | None
+
+
+class InviteOut(BaseModel):
+    id: int
+    org_id: str
+    email: str
+    invite_id: str
+    status: str
+    created_at: datetime
