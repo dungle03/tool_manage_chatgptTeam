@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Workspace
+from app.models import Member, Workspace
 
 router = APIRouter()
 
@@ -24,5 +24,16 @@ def get_workspaces(session: Session = Depends(get_session)):
 
 
 @router.get("/api/workspaces/{id}/members")
-def get_workspace_members(id: str):
-    return []
+def get_workspace_members(id: str, session: Session = Depends(get_session)):
+    rows = session.execute(select(Member).where(Member.org_id == id)).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "email": row.email,
+            "role": row.role,
+            "status": row.status,
+            "invite_date": row.invite_date.isoformat() if row.invite_date else None,
+        }
+        for row in rows
+    ]
