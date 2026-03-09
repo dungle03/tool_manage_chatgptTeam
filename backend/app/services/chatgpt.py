@@ -70,7 +70,9 @@ class ChatGPTService:
         for attempt in range(self.MAX_RETRIES):
             try:
                 if method == "GET":
-                    response = await session.get(url, headers=request_headers, cookies=cookies)
+                    response = await session.get(
+                        url, headers=request_headers, cookies=cookies
+                    )
                 elif method == "POST":
                     response = await session.post(
                         url,
@@ -99,7 +101,11 @@ class ChatGPTService:
                     await asyncio.sleep(delay)
                     continue
 
-                return {"success": False, "error": response.text, "status_code": response.status_code}
+                return {
+                    "success": False,
+                    "error": response.text,
+                    "status_code": response.status_code,
+                }
             except Exception as exc:
                 if attempt < self.MAX_RETRIES - 1:
                     delay = self.RETRY_DELAYS[attempt] + random.uniform(0.5, 1.5)
@@ -132,6 +138,7 @@ class ChatGPTService:
         access_token = payload.get("accessToken")
         if not access_token:
             raise RuntimeError("accessToken missing from refresh response")
+
         return {
             "access_token": access_token,
             "session_token": payload.get("sessionToken") or session_token,
@@ -153,6 +160,7 @@ class ChatGPTService:
             entitlement = info.get("entitlement", {})
             if account_data.get("plan_type") != "team":
                 continue
+
             team_accounts.append(
                 {
                     "account_id": account_id,
@@ -160,12 +168,16 @@ class ChatGPTService:
                     "plan_type": "team",
                     "subscription_plan": entitlement.get("subscription_plan", ""),
                     "expires_at": entitlement.get("expires_at"),
-                    "member_limit": entitlement.get("max_users") or account_data.get("max_users") or 0,
+                    "member_limit": entitlement.get("max_users")
+                    or account_data.get("max_users")
+                    or 0,
                 }
             )
         return team_accounts
 
-    async def get_members(self, access_token: str, account_id: str) -> list[dict[str, Any]]:
+    async def get_members(
+        self, access_token: str, account_id: str
+    ) -> list[dict[str, Any]]:
         all_items: list[dict[str, Any]] = []
         limit = 50
         offset = 0
@@ -190,17 +202,23 @@ class ChatGPTService:
 
         return all_items
 
-    async def get_invites(self, access_token: str, account_id: str) -> list[dict[str, Any]]:
+    async def get_invites(
+        self, access_token: str, account_id: str
+    ) -> list[dict[str, Any]]:
         result = await self._request(
             "GET",
             f"/accounts/{account_id}/invites",
-            headers=self._build_headers(access_token=access_token, account_id=account_id),
+            headers=self._build_headers(
+                access_token=access_token, account_id=account_id
+            ),
         )
         if not result["success"]:
             raise RuntimeError(result.get("error", "failed to fetch invites"))
         return result["data"].get("items", [])
 
-    async def send_invite(self, access_token: str, account_id: str, email: str) -> dict[str, Any]:
+    async def send_invite(
+        self, access_token: str, account_id: str, email: str
+    ) -> dict[str, Any]:
         result = await self._request(
             "POST",
             f"/accounts/{account_id}/invites",
@@ -219,7 +237,9 @@ class ChatGPTService:
             raise RuntimeError(result.get("error", "failed to send invite"))
         return result["data"]
 
-    async def delete_invite(self, access_token: str, account_id: str, email: str) -> dict[str, Any]:
+    async def delete_invite(
+        self, access_token: str, account_id: str, email: str
+    ) -> dict[str, Any]:
         result = await self._request(
             "DELETE",
             f"/accounts/{account_id}/invites",
@@ -234,18 +254,26 @@ class ChatGPTService:
             raise RuntimeError(result.get("error", "failed to delete invite"))
         return result["data"]
 
-    async def delete_member(self, access_token: str, account_id: str, user_id: str) -> dict[str, Any]:
+    async def delete_member(
+        self, access_token: str, account_id: str, user_id: str
+    ) -> dict[str, Any]:
         result = await self._request(
             "DELETE",
             f"/accounts/{account_id}/users/{user_id}",
-            headers=self._build_headers(access_token=access_token, account_id=account_id),
+            headers=self._build_headers(
+                access_token=access_token, account_id=account_id
+            ),
         )
         if not result["success"]:
             raise RuntimeError(result.get("error", "failed to delete member"))
         return result["data"]
 
     def decode_access_token_claims(self, access_token: str) -> dict[str, Any]:
-        return jwt.decode(access_token, options={"verify_signature": False}, algorithms=["HS256", "RS256"])
+        return jwt.decode(
+            access_token,
+            options={"verify_signature": False},
+            algorithms=["HS256", "RS256"],
+        )
 
     def extract_email(self, access_token: str) -> str | None:
         claims = self.decode_access_token_claims(access_token)

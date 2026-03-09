@@ -22,10 +22,12 @@ def seed_data():
             org_id="org_001",
             account_id="org_001",
             name="Team Alpha",
-            member_limit=7,
-            member_count=2,
             access_token="test-access-token",
             session_token="test-session-token",
+            status="live",
+            member_count=2,
+            member_limit=7,
+            last_sync=datetime.now(timezone.utc),
         )
         workspace_no_tokens = Workspace(
             org_id="org_002",
@@ -34,25 +36,29 @@ def seed_data():
             member_limit=7,
             member_count=0,
         )
-        session.add(workspace_no_tokens)
         session.add(workspace)
+        session.add(workspace_no_tokens)
         session.flush()
 
         member = Member(
             org_id="org_001",
+            remote_id="user_remote_1",
             email="member1@company.com",
             name="Member One",
             role="member",
             status="active",
             invite_date=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         )
         owner = Member(
             org_id="org_001",
+            remote_id="user_remote_owner",
             email="owner@company.com",
             name="Owner",
             role="owner",
             status="active",
             invite_date=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         )
         invite = Invite(
             org_id="org_001",

@@ -7,3 +7,4 @@ uvicorn
 python-dotenv
 curl-cffi
 pyjwt
+cryptography
