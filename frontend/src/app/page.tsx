@@ -13,8 +13,7 @@ import {
   kickMember,
   listInvites,
 } from "@/lib/api";
-import type { Workspace, Member } from "@/types/api";
-import type { Invite } from "@/types/api";
+import type { Workspace, Member, Invite } from "@/types/api";
 
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -24,12 +23,10 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load workspaces on mount
   useEffect(() => {
     loadWorkspaces();
   }, []);
 
-  // Load members + invites when workspace selected
   useEffect(() => {
     if (selectedOrg) {
       loadMembers(selectedOrg);
@@ -46,7 +43,7 @@ export default function DashboardPage() {
       if (data.length > 0 && !selectedOrg) {
         setSelectedOrg(data[0].org_id);
       }
-    } catch (err) {
+    } catch {
       setError("Failed to load workspaces");
     } finally {
       setLoading(false);
@@ -67,7 +64,7 @@ export default function DashboardPage() {
       const data = await listInvites(orgId);
       setInvites(data);
     } catch {
-      /* ignored - invites are optional */
+      /* ignored */
     }
   }
 
@@ -96,8 +93,13 @@ export default function DashboardPage() {
   const selectedWorkspace = workspaces.find((w) => w.org_id === selectedOrg);
 
   return (
-    <main className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Workspace Manager</h1>
+    <main className="dashboard">
+      <div className="dashboard-header">
+        <div>
+          <h1>Workspace Manager</h1>
+          <div className="subtitle">Manage your ChatGPT Team workspaces</div>
+        </div>
+      </div>
 
       <DashboardSummary
         totalTeams={workspaces.length}
@@ -107,45 +109,63 @@ export default function DashboardPage() {
       />
 
       {error && (
-        <div role="alert" aria-live="polite" className="text-sm text-red-600 p-3 bg-red-50 rounded">
-          {error}
-          <button onClick={() => setError(null)} className="ml-2 underline">
-            Dismiss
+        <div className="alert alert-error">
+          <span>⚠️ {error}</span>
+          <button className="alert-dismiss" onClick={() => setError(null)}>
+            ✕
           </button>
         </div>
       )}
 
-      {loading && <p>Loading workspaces...</p>}
+      {loading && (
+        <div className="loading">
+          <div className="spinner" />
+          <p style={{ marginTop: 12 }}>Loading workspaces...</p>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {workspaces.map((ws) => (
-          <div key={ws.org_id} onClick={() => setSelectedOrg(ws.org_id)} className="cursor-pointer">
-            <WorkspaceCard
-              title={ws.name}
-              members={activeMembers.length}
-              memberLimit={ws.member_limit}
-              status={ws.org_id === selectedOrg ? "synced" : "synced"}
-            />
-          </div>
-        ))}
-      </div>
+      {!loading && workspaces.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-icon">🏢</div>
+          <p>No workspaces yet. Start the backend and seed some data.</p>
+        </div>
+      )}
+
+      {workspaces.length > 0 && (
+        <div className="workspaces-grid">
+          {workspaces.map((ws) => (
+            <div key={ws.org_id} onClick={() => setSelectedOrg(ws.org_id)}>
+              <WorkspaceCard
+                title={ws.name}
+                members={activeMembers.length}
+                memberLimit={ws.member_limit}
+                status="synced"
+                selected={ws.org_id === selectedOrg}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {selectedOrg && selectedWorkspace && (
-        <section className="space-y-4">
-          <h2 className="text-xl font-semibold">{selectedWorkspace.name} - Members</h2>
+        <>
+          <div className="section-panel">
+            <h2>👥 {selectedWorkspace.name} — Members</h2>
+            <MemberTable members={members} onKick={handleKick} />
+          </div>
 
-          <MemberTable members={members} onKick={handleKick} />
-
-          <h3 className="text-lg font-semibold">Invite New Member</h3>
-          <InvitePanel onInvite={handleInvite} />
+          <div className="section-panel">
+            <h3>📩 Invite New Member</h3>
+            <InvitePanel onInvite={handleInvite} />
+          </div>
 
           {invites.length > 0 && (
-            <>
-              <h3 className="text-lg font-semibold">Pending Invites</h3>
+            <div className="section-panel">
+              <h3>📋 Pending Invites</h3>
               <InviteList invites={invites} />
-            </>
+            </div>
           )}
-        </section>
+        </>
       )}
     </main>
   );

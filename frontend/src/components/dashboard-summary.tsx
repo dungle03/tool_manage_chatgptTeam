@@ -5,19 +5,27 @@ export function DashboardSummary(props: {
   syncErrors: number;
 }) {
   return (
-    <section className="grid grid-cols-4 gap-3">
-      <div>
-        <span>Total teams</span>: {props.totalTeams}
+    <div className="stats-grid">
+      <div className="stat-card accent">
+        <div className="stat-icon">🏢</div>
+        <div className="stat-label">Total teams</div>
+        <div className="stat-value">{props.totalTeams}</div>
       </div>
-      <div>
-        <span>Total members</span>: {props.totalMembers}
+      <div className="stat-card success">
+        <div className="stat-icon">👥</div>
+        <div className="stat-label">Total members</div>
+        <div className="stat-value">{props.totalMembers}</div>
       </div>
-      <div>
-        <span>Pending invites</span>: {props.pendingInvites}
+      <div className="stat-card warning">
+        <div className="stat-icon">📩</div>
+        <div className="stat-label">Pending invites</div>
+        <div className="stat-value">{props.pendingInvites}</div>
       </div>
-      <div>
-        <span>Sync errors</span>: {props.syncErrors}
+      <div className="stat-card danger">
+        <div className="stat-icon">⚠️</div>
+        <div className="stat-label">Sync errors</div>
+        <div className="stat-value">{props.syncErrors}</div>
       </div>
-    </section>
+    </div>
   );
 }

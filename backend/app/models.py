@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -13,8 +13,15 @@ class Workspace(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    account_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     name: Mapped[str] = mapped_column(String)
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="live")
+    member_count: Mapped[int] = mapped_column(Integer, default=0)
     member_limit: Mapped[int] = mapped_column(Integer, default=7)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -25,11 +32,14 @@ class Member(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[str] = mapped_column(String, index=True)
+    remote_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     email: Mapped[str] = mapped_column(String, index=True)
     name: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
     invite_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    picture: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class Invite(Base):

@@ -5,21 +5,44 @@ import { useState } from "react";
 export function InvitePanel({ onInvite }: { onInvite: (email: string, role: string) => Promise<void> }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
+  const [sending, setSending] = useState(false);
 
   return (
     <form
+      className="invite-form"
       onSubmit={async (e) => {
         e.preventDefault();
-        await onInvite(email, role);
+        if (!email.trim()) return;
+        setSending(true);
+        try {
+          await onInvite(email, role);
+          setEmail("");
+        } finally {
+          setSending(false);
+        }
       }}
-      className="space-y-2"
     >
-      <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-      <select value={role} onChange={(e) => setRole(e.target.value)}>
-        <option value="member">member</option>
-        <option value="admin">admin</option>
-      </select>
-      <button type="submit">Send Invite</button>
+      <div className="form-group" style={{ flex: 2 }}>
+        <label className="form-label">Email address</label>
+        <input
+          className="input"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="user@company.com"
+          type="email"
+          required
+        />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Role</label>
+        <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <button className="btn btn-primary" type="submit" disabled={sending}>
+        {sending ? "Sending..." : "📩 Send Invite"}
+      </button>
     </form>
   );
 }

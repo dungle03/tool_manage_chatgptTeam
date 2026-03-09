@@ -24,13 +24,29 @@ export function MemberTable({
     }
   }
 
+  const statusClass = (s: string) =>
+    s === "active" ? "status-active" :
+    s === "pending" ? "status-pending" :
+    s === "invited" ? "status-invited" :
+    s === "removed" ? "status-removed" : "status-error";
+
+  if (members.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-icon">👥</div>
+        <p>No members yet. Invite someone to get started!</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <table className="w-full">
+    <>
+      <table className="data-table">
         <thead>
           <tr>
             <th>Name</th>
             <th>Email</th>
+            <th>Role</th>
             <th>Join Date</th>
             <th>Status</th>
             <th>Action</th>
@@ -41,11 +57,19 @@ export function MemberTable({
             <tr key={m.id}>
               <td>{m.name}</td>
               <td>{m.email}</td>
-              <td>{m.invite_date ?? "-"}</td>
-              <td>{m.status}</td>
+              <td style={{ textTransform: "capitalize" }}>{m.role}</td>
+              <td>{m.invite_date ? new Date(m.invite_date).toLocaleDateString() : "—"}</td>
+              <td>
+                <span className={`status-badge ${statusClass(m.status)}`}>
+                  <span className="status-dot" />
+                  {m.status}
+                </span>
+              </td>
               <td>
                 {m.role !== "owner" && (
-                  <button onClick={() => setTarget(m)}>Kick</button>
+                  <button className="btn btn-danger" onClick={() => setTarget(m)}>
+                    Kick
+                  </button>
                 )}
               </td>
             </tr>
@@ -54,15 +78,24 @@ export function MemberTable({
       </table>
 
       {target && (
-        <div>
-          <p>Confirm kick member</p>
-          <p>{target.email}</p>
-          <button onClick={() => setTarget(null)}>Cancel</button>
-          <button onClick={handleConfirmKick} disabled={kicking}>
-            {kicking ? "Kicking..." : "Confirm"}
-          </button>
+        <div className="confirm-overlay" onClick={() => setTarget(null)}>
+          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h4>⚠️ Confirm Kick</h4>
+            <p>
+              Are you sure you want to remove <strong>{target.name}</strong> ({target.email}) from
+              this workspace? This action cannot be undone.
+            </p>
+            <div className="confirm-actions">
+              <button className="btn btn-ghost" onClick={() => setTarget(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={handleConfirmKick} disabled={kicking}>
+                {kicking ? "Removing..." : "Confirm Kick"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
