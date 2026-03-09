@@ -1,6 +1,7 @@
 import os
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base
@@ -21,6 +22,16 @@ def get_session():
         session.close()
 
 
+def _create_index_if_missing(
+    conn: Connection, table_name: str, index_name: str, columns: str
+) -> None:
+    inspector = inspect(conn)
+    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+    if index_name in existing_indexes:
+        return
+    conn.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({columns})"))
+
+
 def _migrate_add_missing_columns() -> None:
     """Add columns that were added in Phase 2 but may not exist in older DBs."""
     inspector = inspect(engine)
@@ -39,7 +50,9 @@ def _migrate_add_missing_columns() -> None:
             }
             for col, col_type in new_cols.items():
                 if col not in existing:
-                    conn.execute(text(f"ALTER TABLE workspaces ADD COLUMN {col} {col_type}"))
+                    conn.execute(
+                        text(f"ALTER TABLE workspaces ADD COLUMN {col} {col_type}")
+                    )
 
         # members table migrations
         if inspector.has_table("members"):
@@ -51,7 +64,21 @@ def _migrate_add_missing_columns() -> None:
             }
             for col, col_type in new_cols.items():
                 if col not in existing:
-                    conn.execute(text(f"ALTER TABLE members ADD COLUMN {col} {col_type}"))
+                    conn.execute(
+                        text(f"ALTER TABLE members ADD COLUMN {col} {col_type}")
+                    )
+
+            _create_index_if_missing(
+                conn, "members", "ix_members_org_id_id", "org_id, id"
+            )
+            _create_index_if_missing(
+                conn, "members", "ix_members_org_id_remote_id", "org_id, remote_id"
+            )
+
+        if inspector.has_table("invites"):
+            _create_index_if_missing(
+                conn, "invites", "ix_invites_org_id_invite_id", "org_id, invite_id"
+            )
 
         conn.commit()
 

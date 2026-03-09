@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { DashboardSummary } from "@/components/dashboard-summary";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { MemberTable } from "@/components/member-table";
@@ -41,6 +41,7 @@ export default function DashboardPage() {
   const [showImport, setShowImport] = useState(false);
   const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const inflightMemberLoads = useRef(new Map<string, Promise<void>>());
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -68,18 +69,29 @@ export default function DashboardPage() {
   }
 
   async function loadMembers(orgId: string) {
-    updateWsState(orgId, { syncing: true });
-    try {
-      const [members, invites] = await Promise.all([
-        getWorkspaceMembers(orgId),
-        listInvites(orgId).catch(() => [] as Invite[]),
-      ]);
-      updateWsState(orgId, { members, invites, loadedMembers: true });
-    } catch {
-      setError(`Không thể tải dữ liệu workspace ${orgId}`);
-    } finally {
-      updateWsState(orgId, { syncing: false });
+    const existingRequest = inflightMemberLoads.current.get(orgId);
+    if (existingRequest) {
+      return existingRequest;
     }
+
+    const request = (async () => {
+      updateWsState(orgId, { syncing: true });
+      try {
+        const [members, invites] = await Promise.all([
+          getWorkspaceMembers(orgId),
+          listInvites(orgId).catch(() => [] as Invite[]),
+        ]);
+        updateWsState(orgId, { members, invites, loadedMembers: true });
+      } catch {
+        setError(`Không thể tải dữ liệu workspace ${orgId}`);
+      } finally {
+        updateWsState(orgId, { syncing: false });
+        inflightMemberLoads.current.delete(orgId);
+      }
+    })();
+
+    inflightMemberLoads.current.set(orgId, request);
+    return request;
   }
 
   // Nút ↺ Sync — gọi real API ChatGPT, sau đó reload

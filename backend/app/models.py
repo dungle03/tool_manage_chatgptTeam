@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -29,6 +29,10 @@ class Workspace(Base):
 
 class Member(Base):
     __tablename__ = "members"
+    __table_args__ = (
+        Index("ix_members_org_id_id", "org_id", "id"),
+        Index("ix_members_org_id_remote_id", "org_id", "remote_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[str] = mapped_column(String, index=True)
@@ -44,6 +48,7 @@ class Member(Base):
 
 class Invite(Base):
     __tablename__ = "invites"
+    __table_args__ = (Index("ix_invites_org_id_invite_id", "org_id", "invite_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     org_id: Mapped[str] = mapped_column(String, index=True)

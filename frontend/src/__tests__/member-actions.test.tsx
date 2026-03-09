@@ -8,7 +8,7 @@ it("shows Kick button and confirmation", async () => {
   const onKick = vi.fn().mockResolvedValue(undefined);
   render(
     <MemberTable
-      members={[{ id: 1, name: "A", email: "a@x.com", role: "member", status: "active", invite_date: null }]}
+      members={[{ id: 1, remote_id: null, name: "A", email: "a@x.com", role: "member", status: "active", invite_date: null, created_at: null, picture: null }]}
       onKick={onKick}
     />,
   );
