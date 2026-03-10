@@ -14,15 +14,35 @@ from app.services.chatgpt import chatgpt_service
 router = APIRouter()
 
 
-def _parse_datetime(value: str | datetime | None) -> datetime | None:
+def _parse_datetime(value: str | int | float | datetime | None) -> datetime | None:
     if value is None:
         return None
+
+    parsed: datetime | None
+
     if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        parsed = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        epoch = float(value)
+        if abs(epoch) >= 10_000_000_000:
+            epoch /= 1000
+        try:
+            parsed = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    elif isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
         return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _serialize_datetime(value: datetime | None) -> str | None:
@@ -100,12 +120,23 @@ def _get_current_user_role(workspace: Workspace, session: Session) -> str:
     if not workspace.access_token:
         return "user"
 
-    token_user_id = _normalize_identity(
-        chatgpt_service.extract_user_id(workspace.access_token)
-    )
-    token_email = _normalize_identity(
-        chatgpt_service.extract_email(workspace.access_token)
-    )
+    token_user_id = None
+    token_email = None
+
+    try:
+        token_user_id = _normalize_identity(
+            chatgpt_service.extract_user_id(workspace.access_token)
+        )
+    except Exception:
+        token_user_id = None
+
+    try:
+        token_email = _normalize_identity(
+            chatgpt_service.extract_email(workspace.access_token)
+        )
+    except Exception:
+        token_email = None
+
 
     members = (
         session.execute(select(Member).where(Member.org_id == workspace.org_id))
@@ -353,7 +384,10 @@ async def sync_workspace(
     session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
 
     for item in remote_members:
-        created = _parse_datetime(item.get("created") or item.get("created_at"))
+        created_raw = (
+            item.get("created_time") or item.get("created_at") or item.get("created")
+        )
+        created = _parse_datetime(created_raw)
         role = _normalize_member_role(item)
 
         session.add(

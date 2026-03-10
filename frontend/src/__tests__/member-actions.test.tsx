@@ -13,5 +13,5 @@ it("shows Kick button and confirmation", async () => {
     />,
   );
   await user.click(screen.getByRole("button", { name: "Kick" }));
-  expect(screen.getByText("Confirm kick member")).toBeInTheDocument();
+  expect(screen.getByText("Xác nhận xóa thành viên")).toBeInTheDocument();
 });

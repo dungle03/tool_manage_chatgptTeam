@@ -20,7 +20,7 @@ def seed_data():
     try:
         workspace = Workspace(
             org_id="org_001",
-            account_id="org_001",
+            account_id="acc_001",
             name="Team Alpha",
             access_token="test-access-token",
             session_token="test-session-token",
@@ -29,15 +29,7 @@ def seed_data():
             member_limit=7,
             last_sync=datetime.now(timezone.utc),
         )
-        workspace_no_tokens = Workspace(
-            org_id="org_002",
-            account_id="org_002",
-            name="Team Without Tokens",
-            member_limit=7,
-            member_count=0,
-        )
         session.add(workspace)
-        session.add(workspace_no_tokens)
         session.flush()
 
         member = Member(

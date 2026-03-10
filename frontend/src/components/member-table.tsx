@@ -28,6 +28,16 @@ function initialsOf(name: string, email: string): string {
   );
 }
 
+function isActiveMember(status: string): boolean {
+  return status.trim().toLowerCase() === "active";
+}
+
+function parseCreatedAtTimestamp(createdAt: string | null): number | null {
+  if (!createdAt) return null;
+  const timestamp = Date.parse(createdAt);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 export function MemberTable({
   members,
   busyMemberIds = [],
@@ -60,6 +70,29 @@ export function MemberTable({
     );
   }
 
+  const eligibleMembers = members
+    .map((member) => {
+      if (!isActiveMember(member.status)) return null;
+      const createdAtTimestamp = parseCreatedAtTimestamp(member.created_at);
+      if (createdAtTimestamp === null) return null;
+      return {
+        id: member.id,
+        remoteId: member.remote_id ?? "",
+        createdAtTimestamp,
+      };
+    })
+    .filter((member): member is { id: number; remoteId: string; createdAtTimestamp: number } => member !== null)
+    .sort((a, b) => {
+      if (a.createdAtTimestamp !== b.createdAtTimestamp) {
+        return a.createdAtTimestamp - b.createdAtTimestamp;
+      }
+      if (a.remoteId !== b.remoteId) {
+        return a.remoteId.localeCompare(b.remoteId);
+      }
+      return a.id - b.id;
+    });
+  const overLimitMemberIds = new Set(eligibleMembers.slice(5).map((member) => member.id));
+
   return (
     <>
       <div className="table-shell">
@@ -87,7 +120,7 @@ export function MemberTable({
               const displayName = member.name || "No name";
 
               return (
-                <tr key={member.id}>
+                <tr key={member.id} className={overLimitMemberIds.has(member.id) ? "member-overlimit-row" : undefined}>
                   <td>
                     <div className="member-cell">
                       <div className="member-avatar">{initialsOf(member.name, member.email)}</div>

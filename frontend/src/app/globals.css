@@ -566,6 +566,15 @@ textarea {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
+.data-table tbody tr.member-overlimit-row {
+  background: rgba(255, 125, 135, 0.10);
+}
+
+.data-table tbody tr.member-overlimit-row:hover {
+  background: rgba(255, 125, 135, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 125, 135, 0.22);
+}
+
 .member-cell {
   display: flex;
   align-items: center;
