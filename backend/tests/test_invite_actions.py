@@ -1,11 +1,7 @@
-from fastapi.testclient import TestClient
-
 from app.main import app
 
-client = TestClient(app)
 
-
-def test_resend_and_cancel_invite(seed_data, monkeypatch):
+def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 

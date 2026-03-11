@@ -1,15 +1,13 @@
 import asyncio
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers.workspaces import _parse_datetime
 
-client = TestClient(app)
 
 
-def test_sync_workspace_fetches_remote_and_updates_cache(seed_data, monkeypatch):
+def test_sync_workspace_fetches_remote_and_updates_cache(client, seed_data, monkeypatch):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -47,7 +45,7 @@ def test_sync_workspace_fetches_remote_and_updates_cache(seed_data, monkeypatch)
     assert data["invites_synced"] == 1
 
 
-def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(seed_data, monkeypatch):
+def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(client, seed_data, monkeypatch):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -124,6 +122,7 @@ def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(seed_data, mo
     ],
 )
 def test_sync_workspace_uses_expected_date_field_priority(
+    client,
     seed_data,
     monkeypatch,
     member_payload,

@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi.testclient import TestClient
-
 from app.db import SessionLocal
 from app.main import app
 from app.models import Invite, Workspace
@@ -13,7 +11,6 @@ from app.services.workspace_sync import (
     sync_workspace_data,
 )
 
-client = TestClient(app)
 
 
 def test_list_stale_workspace_ids_includes_null_last_sync():
@@ -167,7 +164,7 @@ def test_pick_due_workspaces_prioritizes_hot_and_pending(seed_data):
         session.close()
 
 
-def test_invite_route_schedules_followup(seed_data, monkeypatch):
+def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     scheduled: list[dict[str, str]] = []
 
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
@@ -192,7 +189,7 @@ def test_invite_route_schedules_followup(seed_data, monkeypatch):
     assert scheduled == [{"org_id": "org_001", "reason": "invite_created"}]
 
 
-def test_workspace_events_stream_requires_auth_when_admin_token_set(monkeypatch):
+def test_workspace_events_stream_requires_auth_when_admin_token_set(client, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
     response = client.get("/api/events/workspaces")
     assert response.status_code == 401

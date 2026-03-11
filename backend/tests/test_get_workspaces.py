@@ -1,11 +1,7 @@
-from fastapi.testclient import TestClient
-
 from app.main import app
 
-client = TestClient(app)
 
-
-def test_get_workspaces_returns_list(seed_data):
+def test_get_workspaces_returns_list(client, seed_data):
     response = client.get("/api/workspaces")
     assert response.status_code == 200
     data = response.json()
