@@ -13,6 +13,8 @@
 - Over-limit member warning now starts from the **8th active member**
 - Frontend tests updated to reflect the current UI and business rules
 - Project review and project-memory documents refreshed to match the latest implementation state
+- README chính của repository được đổi lại sang **tiếng Việt** theo quyết định cuối cùng
+- Đồng bộ lại local project memory với một lần `/save_brain` cuối trước khi push
 
 ### Fixed
 - Clarified the backend test workflow to avoid the misleading `python -m pytest backend/tests` invocation from repo root

@@ -1,63 +1,63 @@
 # ChatGPT Workspace Manager
 
-A full-stack dashboard for managing multiple **ChatGPT Team / Workspace** accounts from one place.
+Dashboard full-stack để quản lý nhiều **workspace ChatGPT Team** trong một nơi.
 
-The project combines a **Next.js frontend** with a **FastAPI backend** to import workspaces, inspect members and invites, perform admin actions, and keep the dashboard fresh through **background sync + SSE realtime updates**.
-
----
-
-## Overview
-
-This repository is designed for operators who manage multiple ChatGPT team workspaces and need a single interface to:
-
-- import and monitor team workspaces
-- inspect member and invite state quickly
-- kick members and manage pending invites
-- trigger manual syncs when needed
-- receive near-realtime updates without refreshing the page
-
-The current codebase is in a strong state for **demo, internal use, and small single-instance deployments**.
+Dự án kết hợp **frontend Next.js** và **backend FastAPI** để import workspace, xem danh sách thành viên và invite, thực hiện các thao tác quản trị, đồng thời giữ dashboard luôn mới thông qua **background sync + SSE realtime updates**.
 
 ---
 
-## Key Features
+## Tổng quan
 
-### Workspace operations
-- Import a workspace using `access_token` or `session_token`
-- Display all managed workspaces in a unified dashboard
-- Show seat usage, sync health, expiry date, and hot-sync state
-- Delete a workspace from local management
-- Trigger manual sync per workspace
+Repository này được xây dựng cho người vận hành nhiều workspace ChatGPT Team và cần một giao diện tập trung để:
 
-### Member management
-- View members for each workspace
-- Show join date in `dd/mm/yyyy` format
-- Kick members with a confirmation flow
-- Highlight over-limit members directly in the table
-- Current business rule: **7 seats per team are allowed; the 8th active member onward is highlighted in red**
+- import và theo dõi nhiều workspace
+- xem nhanh trạng thái thành viên và invite
+- kick member và quản lý pending invite
+- trigger manual sync khi cần
+- nhận cập nhật gần realtime mà không cần reload trang
 
-### Invite management
-- Send a new invite by email
-- Resend a pending invite
-- Cancel a pending invite
-- Track pending invites per workspace
+Ở thời điểm hiện tại, codebase đã ở trạng thái tốt cho **demo, sử dụng nội bộ và triển khai single-instance quy mô nhỏ**.
+
+---
+
+## Tính năng chính
+
+### Quản lý workspace
+- Import workspace bằng `access_token` hoặc `session_token`
+- Hiển thị toàn bộ workspace trong một dashboard thống nhất
+- Hiển thị số ghế đã dùng, tình trạng sync, ngày hết hạn và trạng thái hot-sync
+- Xóa workspace khỏi danh sách quản lý cục bộ
+- Trigger manual sync cho từng workspace
+
+### Quản lý thành viên
+- Xem danh sách member theo từng workspace
+- Hiển thị ngày tham gia theo định dạng `dd/mm/yyyy`
+- Kick member với luồng xác nhận rõ ràng
+- Tô đỏ trực tiếp các member vượt quá giới hạn ghế
+- Rule hiện tại: **mỗi team mặc định có 7 ghế; từ member active thứ 8 trở đi mới bị tô đỏ**
+
+### Quản lý invite
+- Mời member mới bằng email
+- Gửi lại invite đang chờ
+- Hủy invite đang chờ
+- Theo dõi số invite pending theo từng workspace
 
 ### Realtime Sync V2
-- FastAPI background worker starts with app lifespan
-- Smart scheduling via hot queue + follow-up sync windows
-- Manual actions automatically trigger follow-up sync
-- SSE stream pushes workspace updates to the dashboard
-- Frontend deduplicates repeated toasts/events for a smoother UX
+- Background worker của FastAPI khởi động cùng app lifespan
+- Scheduler thông minh theo hot queue + follow-up sync windows
+- Các action thủ công tự động trigger follow-up sync
+- SSE stream đẩy cập nhật workspace lên dashboard
+- Frontend có cơ chế dedupe event/toast để giảm nhiễu UI
 
 ### UI/UX
-- Modern dark dashboard UI
-- Expandable workspace cards with animated chevron
-- Status badges for sync state and hot workspaces
-- Compact operational layout for high-density workspace management
+- Dashboard dark mode hiện đại
+- Workspace card có thể expand/collapse với chevron animation
+- Badge trạng thái cho sync state và hot workspace
+- Layout gọn cho nhu cầu vận hành nhiều workspace cùng lúc
 
 ---
 
-## Architecture
+## Kiến trúc hệ thống
 
 ```text
 Frontend (Next.js / React)
@@ -71,7 +71,7 @@ Backend API (FastAPI)
         +--> ChatGPT internal/team APIs
 ```
 
-### Repository structure
+### Cấu trúc repository
 
 ```text
 tool_manage_chatgptTeam/
@@ -101,59 +101,59 @@ tool_manage_chatgptTeam/
 
 ---
 
-## Tech Stack
+## Tech stack
 
-| Layer | Technology |
-|------|------------|
+| Tầng | Công nghệ |
+|------|-----------|
 | Frontend | Next.js 14, React 18, TypeScript |
 | Styling | Vanilla CSS |
 | Backend | FastAPI, SQLAlchemy, Pydantic |
 | Database | SQLite |
 | Realtime | Server-Sent Events (SSE) |
-| Backend tests | pytest |
-| Frontend tests | Vitest, Testing Library |
+| Test backend | pytest |
+| Test frontend | Vitest, Testing Library |
 
 ---
 
-## Current Project Status
+## Trạng thái hiện tại của dự án
 
-### What is working well
-- Workspace import and dashboard listing
-- Member list retrieval and display
-- Invite flow: create, resend, cancel
-- Member removal flow
-- Background sync lifecycle integrated with FastAPI
-- Realtime dashboard refresh via SSE
-- Improved workspace card UX and operational visibility
-- Frontend test stack stabilized on Windows
-- Backend test execution issue identified and documented
+### Những phần đang hoạt động tốt
+- Import workspace và hiển thị dashboard
+- Lấy và hiển thị danh sách member
+- Luồng invite: create, resend, cancel
+- Luồng kick member
+- Background sync gắn với FastAPI lifespan
+- Dashboard cập nhật lại qua SSE
+- Workspace card đã được polish rõ hơn cho vận hành
+- Bộ test frontend đã ổn định trên Windows
+- Vấn đề chạy backend test đã được xác định nguyên nhân và document rõ
 
-### Important operational note about backend tests
-The backend suite can appear to “hang” if it is run from the **repository root** with:
+### Lưu ý quan trọng về backend test
+Backend test có thể trông như bị “treo” nếu chạy từ **thư mục gốc của repository** bằng lệnh:
 
 ```powershell
 python -m pytest backend/tests
 ```
 
-The correct and stable approaches are:
+Cách chạy đúng và ổn định là:
 
 ```powershell
-# From repo root
+# Chạy từ root repo
 ./run_backend_tests.ps1
 
-# Or directly inside backend/
+# Hoặc chạy trực tiếp bên trong backend/
 python -m pytest tests -vv
 ```
 
-This project now includes `run_backend_tests.ps1` to standardize backend test execution from the correct working directory.
+Dự án hiện đã có `run_backend_tests.ps1` để chuẩn hóa việc chạy backend test trong đúng working directory.
 
 ---
 
-## Getting Started
+## Hướng dẫn khởi động nhanh
 
-## 1. Backend setup
+## 1. Cài đặt backend
 
-Create a virtual environment and install dependencies:
+Tạo virtual environment và cài dependencies:
 
 ```powershell
 python -m venv backend/venv
@@ -161,9 +161,9 @@ backend\venv\Scripts\activate
 pip install -r backend/requirements.txt
 ```
 
-Create `backend/.env` from `backend/.env.example` if needed.
+Tạo file `backend/.env` từ `backend/.env.example` nếu cần.
 
-Run the backend **from the `backend/` directory**:
+Chạy backend **từ thư mục `backend/`**:
 
 ```powershell
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
@@ -171,7 +171,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 ---
 
-## 2. Frontend setup
+## 2. Cài đặt frontend
 
 ```powershell
 cd frontend
@@ -179,125 +179,125 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Mở trình duyệt tại [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Environment Variables
+## Biến môi trường
 
 ### Backend (`backend/.env`)
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `DATABASE_URL` | `sqlite:///./workspace_manager.db` | Backend database connection |
-| `SYNC_LOOP_INTERVAL_SECONDS` | `5` | Main background loop interval |
-| `SYNC_STALE_MINUTES` | `5` | Stale workspace threshold |
-| `SYNC_PENDING_INVITE_SECONDS` | `15` | Faster checks for pending invites |
-| `SYNC_BASELINE_MINUTES` | `5` | Baseline refresh cadence |
-| `SYNC_HOT_WINDOW_SECONDS` | `180` | Duration a workspace stays “hot” |
-| `SYNC_FOLLOWUP_STEPS` | `5,15,30,60` | Follow-up sync windows after important actions |
-| `SYNC_ERROR_RETRY_STEPS` | `10,30,60` | Retry windows after sync failures |
-| `SYNC_MAX_PARALLEL_WORKSPACES` | `2` | Max concurrent workspace syncs |
-| `ADMIN_TOKEN` | unset | Protect backend admin endpoints |
-| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | unset | Disable background sync during tests / isolated runs |
+| Biến | Mặc định | Mục đích |
+|------|----------|----------|
+| `DATABASE_URL` | `sqlite:///./workspace_manager.db` | Chuỗi kết nối database backend |
+| `SYNC_LOOP_INTERVAL_SECONDS` | `5` | Chu kỳ vòng lặp nền chính |
+| `SYNC_STALE_MINUTES` | `5` | Ngưỡng xác định workspace stale |
+| `SYNC_PENDING_INVITE_SECONDS` | `15` | Tăng tần suất kiểm tra khi có invite pending |
+| `SYNC_BASELINE_MINUTES` | `5` | Chu kỳ refresh nền cơ bản |
+| `SYNC_HOT_WINDOW_SECONDS` | `180` | Thời gian workspace được giữ ở trạng thái hot |
+| `SYNC_FOLLOWUP_STEPS` | `5,15,30,60` | Các mốc follow-up sync sau action quan trọng |
+| `SYNC_ERROR_RETRY_STEPS` | `10,30,60` | Các mốc retry sau khi sync lỗi |
+| `SYNC_MAX_PARALLEL_WORKSPACES` | `2` | Số workspace sync song song tối đa |
+| `ADMIN_TOKEN` | chưa đặt | Bảo vệ các admin endpoint của backend |
+| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | chưa đặt | Tắt background sync khi test hoặc chạy cô lập |
 
 ### Frontend (`frontend/.env.local`)
 
-| Variable | Purpose |
-|----------|---------|
-| `NEXT_PUBLIC_ADMIN_TOKEN` | Token forwarded by the dashboard to the backend |
+| Biến | Mục đích |
+|------|----------|
+| `NEXT_PUBLIC_ADMIN_TOKEN` | Token frontend gửi sang backend |
 
 ---
 
-## API Surface
+## API chính
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/workspaces` | List managed workspaces |
-| `POST` | `/api/teams/import` | Import team/workspace from token(s) |
-| `GET` | `/api/workspaces/{id}/members` | Get workspace members |
-| `GET` | `/api/workspaces/{id}/sync` | Trigger immediate sync |
-| `DELETE` | `/api/workspaces/{id}` | Remove workspace from local management |
-| `POST` | `/api/invite` | Create invite |
-| `GET` | `/api/invites?org_id=...` | List pending invites |
-| `POST` | `/api/resend-invite` | Resend invite |
-| `DELETE` | `/api/cancel-invite` | Cancel invite |
-| `DELETE` | `/api/member` | Kick member |
-| `GET` | `/api/events/workspaces` | Open SSE workspace event stream |
+| Method | Endpoint | Mô tả |
+|--------|----------|------|
+| `GET` | `/api/workspaces` | Lấy danh sách workspace đang quản lý |
+| `POST` | `/api/teams/import` | Import team/workspace từ token |
+| `GET` | `/api/workspaces/{id}/members` | Lấy danh sách member của workspace |
+| `GET` | `/api/workspaces/{id}/sync` | Trigger sync ngay lập tức |
+| `DELETE` | `/api/workspaces/{id}` | Xóa workspace khỏi danh sách quản lý cục bộ |
+| `POST` | `/api/invite` | Tạo invite mới |
+| `GET` | `/api/invites?org_id=...` | Lấy danh sách invite đang chờ |
+| `POST` | `/api/resend-invite` | Gửi lại invite |
+| `DELETE` | `/api/cancel-invite` | Hủy invite |
+| `DELETE` | `/api/member` | Kick member khỏi workspace |
+| `GET` | `/api/events/workspaces` | Mở SSE stream cho event workspace |
 
 ---
 
-## Testing
+## Chạy test
 
 ### Frontend
-Run from the real project path on Windows for the most reliable Vitest behavior:
+Trên Windows, nên chạy từ path thật của project để Vitest ổn định nhất:
 
 ```powershell
 cd frontend
 npm test
 ```
 
-Optional production check:
+Nếu cần kiểm tra production build:
 
 ```powershell
 npm run build
 ```
 
 ### Backend
-Recommended:
+Khuyến nghị:
 
 ```powershell
 ./run_backend_tests.ps1
 ```
 
-Custom pytest args:
+Nếu muốn truyền thêm tham số pytest:
 
 ```powershell
 ./run_backend_tests.ps1 -PytestArgs @('tests', '-vv', '-x')
 ```
 
-Alternative (directly from `backend/`):
+Cách khác (chạy trực tiếp trong `backend/`):
 
 ```powershell
 python -m pytest tests -vv
 ```
 
-> Do **not** rely on `python -m pytest backend/tests` from the repository root. It can run in the wrong context and make the suite appear stuck.
+> Không nên dùng `python -m pytest backend/tests` từ thư mục gốc repo, vì cách này có thể chạy sai context và tạo cảm giác test bị treo.
 
 ---
 
-## Review Summary (2026-03-12)
+## Tóm tắt review (2026-03-12)
 
-The latest project review is tracked in:
+Bản review mới nhất nằm tại:
 
 - [docs/PROJECT_REVIEW_20260312.md](file:///D:/laptrinh/laptrinh/code/LinhTinh/tool_manage_chatgptTeam/docs/PROJECT_REVIEW_20260312.md)
 
-High-level conclusion:
-- The product is feature-complete for its current internal scope
-- Realtime behavior and dashboard usability are in a good state
-- Test workflows are now better documented and more reliable
-- The main scaling limitation remains the in-memory SSE/event model for multi-instance deployments
+Kết luận ở mức cao:
+- Product đã đủ tính năng cho phạm vi nội bộ hiện tại
+- Hành vi realtime và UX dashboard đang ở trạng thái tốt
+- Quy trình test đã được document rõ và ổn định hơn
+- Giới hạn lớn nhất khi scale vẫn là mô hình SSE/event dạng in-memory cho multi-instance
 
 ---
 
-## Known Limitations
+## Giới hạn hiện tại
 
-- SSE/event delivery is currently best suited for **single-instance deployment**
-- SQLite is convenient for development and small internal deployments, but a larger rollout should move to PostgreSQL
-- The project depends on ChatGPT internal/team APIs, so upstream response changes can require maintenance
-- Frontend test commands are more reliable from the real Windows drive path than through a symlinked path
-
----
-
-## Recommended Next Steps
-
-- Add Redis/pub-sub if multi-instance realtime support is required
-- Expand end-to-end coverage around SSE and sync scheduling
-- Add deployment documentation for staging/production environments
-- Consider PostgreSQL for shared/team deployment scenarios
+- SSE/event delivery hiện phù hợp nhất cho **single-instance deployment**
+- SQLite tiện cho local/dev và triển khai nội bộ nhỏ, nhưng nếu scale lớn nên chuyển PostgreSQL
+- Dự án phụ thuộc vào ChatGPT internal/team APIs, nên nếu upstream thay đổi contract thì backend có thể cần cập nhật
+- Các lệnh test frontend đáng tin cậy hơn khi chạy từ path thật trên Windows thay vì path symlink
 
 ---
 
-## License / Usage Note
+## Bước tiếp theo được khuyến nghị
 
-This repository is currently prepared as an internal operational tool. Review your organization’s security and compliance requirements before production rollout.
+- Thêm Redis/pub-sub nếu cần realtime multi-instance
+- Bổ sung test end-to-end cho SSE và sync scheduling
+- Viết thêm tài liệu deploy cho môi trường staging/production
+- Cân nhắc chuyển sang PostgreSQL nếu cần dùng chung ở quy mô lớn hơn
+
+---
+
+## Ghi chú sử dụng
+
+Repository này hiện đang được chuẩn bị như một công cụ vận hành nội bộ. Trước khi rollout production, nên review thêm các yêu cầu về bảo mật, phân quyền và compliance của tổ chức.
