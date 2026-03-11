@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite, Workspace
-from app.routers.workspaces import _resolve_access_token
 from app.schemas import InviteActionRequest, InviteRequest
 from app.services.chatgpt import chatgpt_service
+from app.services.workspace_sync import resolve_access_token, schedule_followup_sync
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ async def invite_member(
         raise HTTPException(status_code=404, detail="workspace not found")
 
     account_id = workspace.account_id or workspace.org_id
-    access_token = await _resolve_access_token(workspace)
+    access_token = await resolve_access_token(workspace)
 
     try:
         response = await chatgpt_service.send_invite(
@@ -69,6 +69,11 @@ async def invite_member(
         created_at=datetime.now(timezone.utc),
     )
     session.add(invite)
+    schedule_followup_sync(
+        session,
+        workspace,
+        reason="invite_created",
+    )
     session.commit()
     return {"ok": True, "invite_id": invite.invite_id, "role": payload.role}
 
@@ -94,7 +99,7 @@ async def resend_invite(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    access_token = await _resolve_access_token(workspace)
+    access_token = await resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
 
     try:
@@ -103,6 +108,11 @@ async def resend_invite(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     row.status = "pending"
+    schedule_followup_sync(
+        session,
+        workspace,
+        reason="invite_resend",
+    )
     session.commit()
     return {"ok": True, "status": row.status, "invite_id": row.invite_id}
 
@@ -128,7 +138,7 @@ async def cancel_invite(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    access_token = await _resolve_access_token(workspace)
+    access_token = await resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
 
     try:
@@ -137,5 +147,10 @@ async def cancel_invite(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     row.status = "cancelled"
+    schedule_followup_sync(
+        session,
+        workspace,
+        reason="invite_cancelled",
+    )
     session.commit()
     return {"ok": True, "status": row.status, "invite_id": row.invite_id}

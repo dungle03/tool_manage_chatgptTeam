@@ -12,3 +12,4 @@ def test_get_workspaces_returns_list(seed_data):
     assert isinstance(data, list)
     assert data[0]["org_id"] == "org_001"
     assert "member_limit" in data[0]
+    assert data[0]["pending_invites"] == 1

@@ -4,14 +4,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db import init_db
-from app.routers import invites, members, workspaces
+from app.db import SessionLocal, init_db
+from app.routers import events, invites, members, workspaces
+from app.services.workspace_sync import (
+    start_background_sync_worker,
+    stop_background_sync_worker,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    start_background_sync_worker(SessionLocal)
+    try:
+        yield
+    finally:
+        await stop_background_sync_worker()
 
 
 app = FastAPI(title="Workspace Manager API", lifespan=lifespan)
@@ -28,3 +36,4 @@ app.add_middleware(
 app.include_router(workspaces.router)
 app.include_router(members.router)
 app.include_router(invites.router)
+app.include_router(events.router)

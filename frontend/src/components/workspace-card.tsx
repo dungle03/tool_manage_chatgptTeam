@@ -9,13 +9,15 @@ type WorkspaceCardProps = {
   status: "synced" | "warning" | "error";
   selected?: boolean;
   lastSync?: string | null;
+  expiresAt?: string | null;
   syncing?: boolean;
+  isHot?: boolean;
+  syncReason?: string | null;
   expandedContent?: ReactNode;
   onSync?: () => void;
   onDelete?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
 };
-
 
 function formatSyncTime(lastSync?: string | null): string {
   if (!lastSync) return "Chưa sync";
@@ -26,6 +28,35 @@ function formatSyncTime(lastSync?: string | null): string {
   return `${Math.floor(diff / 86400)}d trước`;
 }
 
+function formatReason(reason?: string | null): string | null {
+  if (!reason) return null;
+  if (reason === "pending_invite_watch") return "Watching invites";
+  if (reason === "invite_created") return "Invite follow-up";
+  if (reason === "invite_resend") return "Resend follow-up";
+  if (reason === "invite_cancelled") return "Cancel follow-up";
+  if (reason === "member_kicked") return "Member update watch";
+  if (reason === "manual_sync") return "Manual sync watch";
+  if (reason === "workspace_imported") return "Import warm-up";
+  if (reason === "retry_after_error") return "Retry scheduled";
+  if (reason.startsWith("followup:")) return "Hot follow-up";
+  if (reason === "baseline_refresh") return "Baseline refresh";
+  return reason;
+}
+
+function formatExpiryDate(expiresAt?: string | null): string {
+  if (!expiresAt) return "Hết hạn: Chưa rõ";
+
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) {
+    return "Hết hạn: Chưa rõ";
+  }
+
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `Hết hạn: ${day}/${month}/${year}`;
+}
+
 export function WorkspaceCard({
   title,
   members,
@@ -33,18 +64,22 @@ export function WorkspaceCard({
   status,
   selected,
   lastSync,
+  expiresAt,
   syncing = false,
+  isHot = false,
+  syncReason,
   expandedContent,
   onSync,
   onDelete,
   onExpandedChange,
 }: WorkspaceCardProps) {
   const [expanded, setExpanded] = useState(selected ?? false);
-  const seatLimit = 5;
+  const seatLimit = memberLimit > 0 ? memberLimit : 5;
   const pct = seatLimit > 0 ? Math.min(100, Math.round((members / seatLimit) * 100)) : 0;
   const statusLabel = status === "synced" ? "Live" : status === "warning" ? "Needs sync" : "Issue";
   const badgeClass =
     status === "synced" ? "badge-synced" : status === "warning" ? "badge-warning" : "badge-error";
+  const reasonLabel = formatReason(syncReason);
 
   return (
     <section className={`workspace-card${expanded ? " selected" : ""}`}>
@@ -62,16 +97,31 @@ export function WorkspaceCard({
           id={`workspace-toggle-${title.replace(/\s+/g, "-").toLowerCase()}`}
         >
           <div className="workspace-card-heading">
-            <span className="workspace-chevron" aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+            <span
+              className={`workspace-chevron${expanded ? " is-expanded" : ""}`}
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 4.75 12.5 10 7 15.25" />
+              </svg>
+            </span>
             <div className="workspace-title-stack">
               <div className="workspace-title-row">
                 <span className="workspace-card-title">{title}</span>
                 <span className={`workspace-badge ${badgeClass}`}>{statusLabel}</span>
+                {isHot && <span className="workspace-badge badge-warning">Hot</span>}
               </div>
+              <div className="workspace-meta-subline">{formatExpiryDate(expiresAt)}</div>
               <div className="workspace-meta-row">
                 <span>{members} members</span>
                 <span className="meta-dot">•</span>
                 <span>Last sync {formatSyncTime(lastSync)}</span>
+                {reasonLabel && (
+                  <>
+                    <span className="meta-dot">•</span>
+                    <span>{reasonLabel}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

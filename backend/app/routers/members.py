@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Member, Workspace
-from app.routers.workspaces import _resolve_access_token
 from app.schemas import KickMemberRequest
 from app.services.chatgpt import chatgpt_service
+from app.services.workspace_sync import resolve_access_token, schedule_followup_sync
 
 router = APIRouter()
 
@@ -47,7 +47,7 @@ async def delete_member(
         raise HTTPException(status_code=404, detail="workspace not found")
 
     account_id = workspace.account_id or workspace.org_id
-    access_token = await _resolve_access_token(workspace)
+    access_token = await resolve_access_token(workspace)
 
     remote_user_id = payload.user_id or row.remote_id
     if remote_user_id:
@@ -63,5 +63,10 @@ async def delete_member(
     row.status = "removed"
     if workspace.member_count > 0:
         workspace.member_count -= 1
+    schedule_followup_sync(
+        session,
+        workspace,
+        reason="member_kicked",
+    )
     session.commit()
     return {"ok": True, "member_id": row.id, "status": row.status}

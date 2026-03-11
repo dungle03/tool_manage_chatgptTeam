@@ -38,6 +38,21 @@ function parseCreatedAtTimestamp(createdAt: string | null): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function formatJoinDate(createdAt: string | null, inviteDate: string | null): string {
+  const source = createdAt || inviteDate;
+  if (!source) return "Tham gia: Chưa rõ";
+
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) {
+    return "Tham gia: Chưa rõ";
+  }
+
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `Tham gia: ${day}/${month}/${year}`;
+}
+
 export function MemberTable({
   members,
   busyMemberIds = [],
@@ -126,7 +141,9 @@ export function MemberTable({
                       <div className="member-avatar">{initialsOf(member.name, member.email)}</div>
                       <div className="member-info">
                         <div className="member-name">{displayName}</div>
-                        <div className="member-subtle">ID: {member.remote_id || member.id}</div>
+                        <div className="member-subtle">
+                          {formatJoinDate(member.created_at, member.invite_date)}
+                        </div>
                       </div>
                     </div>
                   </td>

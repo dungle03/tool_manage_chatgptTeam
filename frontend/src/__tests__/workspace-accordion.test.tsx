@@ -15,6 +15,7 @@ it("toggles accordion content and shows current status label", async () => {
   );
 
   expect(screen.getByText("Live")).toBeInTheDocument();
+  expect(screen.getByText("4/7")).toBeInTheDocument();
   expect(screen.queryByTestId("members-table")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: /mở chatgpt team alpha/i }));

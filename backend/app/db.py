@@ -44,9 +44,17 @@ def _migrate_add_missing_columns() -> None:
                 "access_token": "TEXT",
                 "session_token": "TEXT",
                 "status": "VARCHAR DEFAULT 'live'",
+                "sync_error": "TEXT",
                 "member_count": "INTEGER DEFAULT 0",
                 "expires_at": "DATETIME",
                 "last_sync": "DATETIME",
+                "sync_started_at": "DATETIME",
+                "sync_finished_at": "DATETIME",
+                "next_sync_at": "DATETIME",
+                "hot_until": "DATETIME",
+                "last_activity_at": "DATETIME",
+                "sync_reason": "VARCHAR",
+                "sync_priority": "INTEGER DEFAULT 0",
             }
             for col, col_type in new_cols.items():
                 if col not in existing:

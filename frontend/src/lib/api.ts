@@ -1,4 +1,4 @@
-import type { Member, Workspace, Invite } from "@/types/api";
+import type { Member, Workspace, Invite, WorkspaceEvent } from "@/types/api";
 
 type ImportedWorkspace = { id: number; org_id: string; name: string };
 type ImportTeamResponse = { imported: ImportedWorkspace[] };
@@ -62,6 +62,21 @@ export async function deleteWorkspace(orgId: string): Promise<MutationResponse> 
   return requestJson<MutationResponse>(`/api/workspaces/${orgId}`, "DELETE");
 }
 
+export function invalidateApiCache() {
+  invalidateGetCache();
+}
+
+export function buildWorkspaceEventsUrl(): string {
+  const url = new URL("/api/events/workspaces", window.location.origin);
+  if (ADMIN_TOKEN) {
+    url.searchParams.set("admin_token", ADMIN_TOKEN);
+  }
+  return url.toString();
+}
+
+export function parseWorkspaceEvent(raw: string): WorkspaceEvent {
+  return JSON.parse(raw) as WorkspaceEvent;
+}
 
 function invalidateGetCache() {
   getCache.clear();
