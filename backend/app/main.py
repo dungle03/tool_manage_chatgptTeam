@@ -15,11 +15,16 @@ from app.services.workspace_sync import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    start_background_sync_worker(SessionLocal)
+    background_sync_enabled = (
+        os.getenv("WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC", "0") != "1"
+    )
+    if background_sync_enabled:
+        start_background_sync_worker(SessionLocal)
     try:
         yield
     finally:
-        await stop_background_sync_worker()
+        if background_sync_enabled:
+            await stop_background_sync_worker()
 
 
 app = FastAPI(title="Workspace Manager API", lifespan=lifespan)

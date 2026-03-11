@@ -74,7 +74,7 @@ export function WorkspaceCard({
   onExpandedChange,
 }: WorkspaceCardProps) {
   const [expanded, setExpanded] = useState(selected ?? false);
-  const seatLimit = memberLimit > 0 ? memberLimit : 5;
+  const seatLimit = memberLimit > 0 ? memberLimit : 7;
   const pct = seatLimit > 0 ? Math.min(100, Math.round((members / seatLimit) * 100)) : 0;
   const statusLabel = status === "synced" ? "Live" : status === "warning" ? "Needs sync" : "Issue";
   const badgeClass =

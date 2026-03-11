@@ -117,7 +117,6 @@ export default function DashboardPage() {
       if (!options?.silent) {
         setLoading(true);
       }
-      invalidateApiCache();
       const data = await getWorkspaces();
       setWorkspaces(data);
     } catch {
@@ -391,7 +390,6 @@ export default function DashboardPage() {
     try {
       await syncWorkspace(orgId);
       await loadMembers(orgId);
-      await loadWorkspaces({ silent: true });
       showToast(
         "Đồng bộ hoàn tất",
         `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`,
@@ -415,7 +413,16 @@ export default function DashboardPage() {
     try {
       await kickMember({ org_id: orgId, member_id: memberId });
       await loadMembers(orgId);
-      await loadWorkspaces({ silent: true });
+      setWorkspaces((prev) =>
+        prev.map((workspace) =>
+          workspace.org_id === orgId
+            ? {
+                ...workspace,
+                member_count: Math.max(0, (workspace.member_count ?? 0) - 1),
+              }
+            : workspace
+        )
+      );
       showToast(
         "Đã xóa thành viên",
         "Thành viên đã được gỡ khỏi workspace thành công.",
@@ -478,6 +485,16 @@ export default function DashboardPage() {
 
     try {
       await cancelInvite({ org_id: orgId, invite_id: inviteId });
+      setWorkspaces((prev) =>
+        prev.map((workspace) =>
+          workspace.org_id === orgId
+            ? {
+                ...workspace,
+                pending_invites: Math.max(0, (workspace.pending_invites ?? 0) - 1),
+              }
+            : workspace
+        )
+      );
       showToast(
         "Đã thu hồi lời mời",
         "Invite đã được revoke và dashboard đã cập nhật ngay lập tức.",
@@ -498,7 +515,6 @@ export default function DashboardPage() {
         delete next[inviteId];
         return { inviteActionState: next };
       });
-      void loadWorkspaces({ silent: true });
     }
   }
 
@@ -729,6 +745,7 @@ export default function DashboardPage() {
           onClose={() => setShowImport(false)}
           onImported={() => {
             setShowImport(false);
+            invalidateApiCache();
             void loadWorkspaces({ silent: true });
           }}
         />

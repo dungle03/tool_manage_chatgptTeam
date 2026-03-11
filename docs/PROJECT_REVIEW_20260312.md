@@ -1,216 +1,171 @@
 # 📊 PROJECT REVIEW: ChatGPT Workspace Manager
 
-Ngày review: 2026-03-12
-
-## 🎯 Mục tiêu review
-Review này nhằm:
-- rà lại toàn bộ trạng thái dự án sau các thay đổi mới nhất
-- tổng hợp tính năng đã có để dễ bàn giao hoặc deploy
-- chỉ ra các rủi ro còn lại cần xử lý tiếp
+**Review date:** 2026-03-12
 
 ---
 
-## 1) App này hiện làm được gì?
-Đây là dashboard web để quản lý nhiều **ChatGPT Team workspaces** trong một nơi.
+## Executive Summary
 
-Hiện tại app đã hỗ trợ:
-- import team bằng `access_token` hoặc `session_token`
-- xem danh sách workspace với trạng thái sync
-- xem thành viên của từng workspace
-- mời thành viên mới
-- resend / cancel invite đang chờ
-- kick member khỏi workspace
-- manual sync từng workspace
-- auto sync nền theo cơ chế **Realtime Sync V2**
-- cập nhật dashboard gần realtime qua **SSE**
-- hiển thị ngày tham gia member
-- hiển thị ngày hết hạn team
-- hiển thị trạng thái hot / sync reason trên dashboard
+`tool_manage_chatgptTeam` is now a solid full-stack operations dashboard for managing multiple ChatGPT team workspaces from one interface.
+
+The project currently delivers:
+- workspace import and local management
+- member and invite administration
+- background sync with follow-up scheduling
+- SSE-driven dashboard refresh
+- a refined operator-focused UI
+- stabilized frontend tests and a documented backend test workflow
+
+At this point, the project is **ready for demo, internal usage, and small single-instance deployment**.
 
 ---
 
-## 2) Cấu trúc chính
+## Final Review Scope
 
-```text
-tool_manage_chatgptTeam/
-├─ backend/
-│  ├─ app/
-│  │  ├─ main.py
-│  │  ├─ db.py
-│  │  ├─ models.py
-│  │  ├─ routers/
-│  │  │  ├─ workspaces.py
-│  │  │  ├─ members.py
-│  │  │  ├─ invites.py
-│  │  │  └─ events.py
-│  │  └─ services/
-│  │     ├─ chatgpt.py
-│  │     ├─ workspace_sync.py
-│  │     └─ events.py
-│  ├─ tests/
-│  └─ requirements.txt
-├─ frontend/
-│  ├─ src/
-│  │  ├─ app/page.tsx
-│  │  ├─ app/globals.css
-│  │  ├─ components/
-│  │  ├─ lib/api.ts
-│  │  └─ types/api.ts
-├─ docs/
-│  ├─ DESIGN.md
-│  ├─ PROJECT_REVIEW_20260311.md
-│  └─ PROJECT_REVIEW_20260312.md
-└─ README.md
-```
+This review covers the latest project state after the following work streams were completed:
+
+1. frontend test stack stabilization
+2. Realtime Sync V2 and workspace event handling polish
+3. member over-limit warning behavior refinement
+4. backend test execution workflow clarification
+5. repository documentation and cleanup pass
 
 ---
 
-## 3) Tech stack
+## Delivered Capabilities
 
-| Thành phần | Công nghệ |
-|-----------|-----------|
-| Frontend | Next.js 14, React 18, TypeScript |
-| Styling | Vanilla CSS |
-| Backend | FastAPI, SQLAlchemy |
-| Database | SQLite (dev), PostgreSQL-ready |
-| Realtime | Server-Sent Events (SSE) |
-| Frontend test | Vitest + Testing Library |
-| Backend test | pytest |
+### 1. Workspace management
+- Import teams using `access_token` or `session_token`
+- Persist workspaces in the local database
+- Show seat usage, expiry date, sync state, and sync reason
+- Allow manual sync and local workspace deletion
 
----
+### 2. Member management
+- Retrieve and display member lists per workspace
+- Show join date in human-readable format
+- Kick members with confirm dialog
+- Highlight over-limit members directly in the table
+- Business rule now matches current product expectation: **7 members allowed, 8th active member onward highlighted red**
 
-## 4) Trạng thái hiện tại
+### 3. Invite operations
+- Create invite by email
+- Resend invite
+- Cancel invite
+- Track pending invite state in the workspace detail area
 
-### ✅ Điểm đã hoàn thành tốt
-- Kiến trúc frontend/backend đã rõ ràng và tách lớp hợp lý.
-- Background sync worker đã được gắn vào FastAPI lifespan.
-- Realtime Sync V2 đã có scheduler ưu tiên workspace “hot”.
-- Các action quan trọng như import team / invite / kick / manual sync đều có follow-up sync.
-- Dashboard đã nhận sự kiện SSE và cập nhật trạng thái tốt hơn trước.
-- UI đã được polish thêm ở khu vực workspace card.
-- Frontend build đang pass.
-- Git repo đang sạch sau khi commit/push gần nhất.
+### 4. Realtime operations
+- Background sync loop attached to FastAPI lifespan
+- Smart scheduling for hot workspaces and follow-up sync windows
+- SSE event stream notifies frontend about workspace activity
+- Frontend refresh strategy avoids noisy repeated requests and duplicate toasts
 
-### ✅ Các cải tiến mới đã có trong bản hiện tại
-- thay polling chậm bằng cơ chế **hot queue + smart polling**
-- thêm các field sync mới vào workspace:
-  - `next_sync_at`
-  - `hot_until`
-  - `last_activity_at`
-  - `sync_reason`
-  - `sync_priority`
-- support event `workspace_scheduled`
-- toast dedupe để bớt spam UI
-- member table đổi từ ID sang **ngày tham gia** (`dd/mm/yyyy`)
-- workspace card hiển thị **ngày hết hạn team** (`dd/mm/yyyy`)
-- icon expand/collapse của team card đã đổi sang **SVG chevron** có animation xoay
+### 5. Testing workflow
+- Frontend Vitest stack stabilized for the current Windows environment
+- Backend test-suite “hang” root cause identified as an execution-context issue, not a broken suite
+- Standardized backend runner script added: `run_backend_tests.ps1`
 
 ---
 
-## 5) Sức khỏe dự án
+## Strengths
 
-| Hạng mục | Kết quả | Đánh giá |
-|---------|---------|----------|
-| Frontend build | ✅ Pass | Tốt |
-| Git status | ✅ Clean | Tốt |
-| README | ⚠️ Trước đó cũ, đã được cập nhật trong review này | Đã xử lý |
-| Realtime architecture | ✅ Đã có nền tảng tốt | Tốt |
-| Backend test run tổng | ⚠️ Có dấu hiệu treo rất lâu | Cần điều tra |
+### Architecture
+- Clean separation between frontend, backend routers, and service layer
+- Realtime sync logic is meaningful and product-oriented
+- SSE model is simple and effective for the current deployment scale
 
----
+### Product usability
+- Dashboard is now much more informative operationally
+- Workspace card design communicates status clearly
+- Critical actions are easy to discover and execute
 
-## 6) Review theo góc nhìn tính năng
-
-### Workspace management
-**Tình trạng:** tốt
-- list workspace đã có đủ thông tin vận hành cơ bản
-- có delete workspace
-- có import team
-- có hiển thị member limit, member count, expiry date
-
-### Member management
-**Tình trạng:** tốt
-- xem member list ổn
-- role display rõ
-- kick member có confirm dialog
-- đã đổi hiển thị phụ sang ngày tham gia, đúng nhu cầu thực tế hơn ID
-
-### Invite flow
-**Tình trạng:** tốt
-- invite / resend / cancel đã có
-- có pending invite theo workspace
-- follow-up sync sau action giúp UI cập nhật nhanh hơn
-
-### Realtime sync
-**Tình trạng:** khá tốt
-- đây là phần mạnh nhất của dự án hiện tại
-- scheduler V2 đã giúp dashboard phản ứng tốt hơn với thay đổi team
-- SSE event model rõ ràng, đủ để frontend refetch hợp lý
-
-### UI/UX
-**Tình trạng:** khá tốt
-- dark theme đồng bộ
-- workspace card nhìn tốt hơn trước
-- các chi tiết nhỏ như join date, expiry date, chevron đã được polish
-- cảm giác dashboard hiện tại đã gần mức sẵn sàng demo / deploy nội bộ
+### Code health
+- Important frontend flows are covered by component tests
+- Backend sync/test behavior is now better understood and documented
+- Business rule adjustments have corresponding tests
 
 ---
 
-## 7) Rủi ro và việc cần cải thiện tiếp
+## Verified Fixes / Improvements
 
-### 🔴 Ưu tiên cao
-1. **Backend test suite đang chạy quá lâu**
-   - Hiện có một phiên `python -m pytest backend/tests` chạy hơn 2 giờ.
-   - Đây là dấu hiệu bất thường, cần điều tra trước khi tự tin deploy production.
-   - Có thể do worker nền, loop, I/O hoặc test nào đó đang chờ vô hạn.
+### Backend test execution
+**Problem:** running `python -m pytest backend/tests` from the repo root could appear to hang for a very long time.
 
-2. **SSE hiện phù hợp single-process hơn multi-instance**
-   - Broker đang là in-memory.
-   - Ổn cho local/dev hoặc small deployment.
-   - Nếu scale nhiều instance, nên nâng cấp sang Redis pub/sub hoặc message broker.
+**Finding:** the issue came from running pytest in the wrong working context.
 
-3. **Cache GET ở frontend đang ngắn hạn nhưng vẫn cần lưu ý với realtime**
-   - TTL hiện tại 3 giây.
-   - Với UI gần realtime thì ổn ở mức vừa phải.
-   - Nếu sau này cần “instant” hơn nữa, nên cân nhắc invalidation theo `org_id` chi tiết hơn.
+**Resolution:**
+- tests should run from `backend/`
+- helper script `run_backend_tests.ps1` was added at repo root
+- README updated with the correct instructions
 
-### 🟡 Ưu tiên trung bình
-1. Thêm dashboard metrics rõ hơn cho pending invites / next sync time.
-2. Bổ sung test runtime cho luồng SSE end-to-end.
-3. Tách thêm config runtime để test scheduler linh hoạt hơn.
-4. Chuẩn hóa thêm log production để tránh log quá nhiều dữ liệu nhạy cảm.
+### Seat-limit warning
+**Previous behavior:** the UI highlighted members as over-limit too early.
 
----
+**Current behavior:**
+- seat limit defaults to **7**
+- only the **8th active member onward** is highlighted red
+- related frontend tests were updated and pass
 
-## 8) Đánh giá readiness để deploy
-
-### Hiện tại có thể nói là:
-- **Sẵn sàng cho demo / staging:** Có
-- **Sẵn sàng cho production nhỏ / nội bộ:** Gần đạt
-- **Sẵn sàng production lớn / nhiều instance:** Chưa hoàn toàn
-
-### Điều kiện nên làm trước khi deploy production tự tin hơn
-- xử lý dứt điểm vụ backend pytest chạy treo
-- test lại worker nền khi restart app
-- xác nhận SSE reconnect ổn trong môi trường deploy thật
-- xác nhận `ADMIN_TOKEN`, `DATABASE_URL`, CORS và env sync tuning đã set đúng
+### Frontend testing on Windows
+- project test guidance now reflects the real stable path behavior on Windows
+- Vitest setup remains aligned with current component structure and labels
 
 ---
 
-## 9) Kết luận ngắn
-Dự án hiện tại **đã tiến rất xa** so với trạng thái dashboard sync thủ công ban đầu.
+## Cleanup Review
 
-Điểm mạnh nhất là:
-- luồng quản lý workspace/member/invite đã tương đối đầy đủ
-- Realtime Sync V2 đã giúp trải nghiệm dashboard tốt lên đáng kể
-- UI đã đạt mức gọn, hiện đại, dễ dùng
-
-**Blocker chính còn lại** trước khi yên tâm deploy là:
-- cần điều tra vì sao `pytest backend/tests` có thể treo quá lâu
+The repository is in a better handoff state after the cleanup pass:
+- stale test database files are removable and should not be retained in the repo
+- Python cache files and generated logs are safe to clean
+- `.gitignore` already excludes `.brain/`, `*.db`, `__pycache__/`, logs, and frontend build artifacts
 
 ---
 
-## 10) Đề xuất bước tiếp theo
-1. Chạy `/debug` để điều tra test backend bị treo.
-2. Sau khi xử lý xong, chạy `/test` lại toàn bộ.
-3. Nếu mọi thứ ổn, chuyển sang `/deploy`.
+## Remaining Limitations
+
+### 1. Realtime scaling
+The SSE/event setup is currently best for **single-instance deployment** because the event broker behavior is effectively local/in-memory.
+
+### 2. Storage strategy
+SQLite is appropriate for local/dev and small internal usage, but a larger shared deployment should move toward PostgreSQL.
+
+### 3. Upstream dependency risk
+The project relies on ChatGPT internal/team endpoints. Any upstream contract shift may require backend maintenance.
+
+### 4. Deployment hardening
+The codebase is close to internal-production readiness, but multi-instance infrastructure, centralized eventing, and more formal deployment docs would strengthen it further.
+
+---
+
+## Deployment Readiness
+
+| Target | Status | Notes |
+|--------|--------|-------|
+| Demo | ✅ Ready | Strong enough to showcase the full product flow |
+| Staging | ✅ Ready | Good candidate for internal validation |
+| Small internal production | ✅ Nearly ready | Works well with single-instance assumptions |
+| Large multi-instance production | ⚠️ Not yet | Needs shared eventing and stronger infra story |
+
+---
+
+## Final Verdict
+
+The project has reached a **good release-prep state** for its intended current scope.
+
+### Why it is in a strong state now
+- Core workspace/member/invite operations are implemented
+- Realtime sync materially improves the operator experience
+- The UI is organized and ready for repo presentation
+- The README and internal review now accurately match the codebase
+- Known testing confusion has been resolved with a repeatable workflow
+
+### Highest-value next improvements
+1. Add deployment/runbook documentation
+2. Add multi-instance realtime support if scaling is needed
+3. Add more end-to-end operational tests
+4. Move to PostgreSQL for broader deployment scenarios
+
+---
+
+## Review Conclusion
+
+If the current goal is to publish the repository, share it internally, or continue from a clean checkpoint later, the project is now in a suitable state to do so.

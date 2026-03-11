@@ -1,8 +1,16 @@
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+
+TEST_DB_PATH = Path(__file__).resolve().parent / f"workspace_manager_test_{os.getpid()}.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
+os.environ.setdefault("WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC", "1")
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.db import SessionLocal, engine
+from app.main import app
 from app.models import Base, Invite, Member, Workspace
 
 
@@ -12,6 +20,12 @@ def clean_db():
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def client():
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture

@@ -106,7 +106,7 @@ export function MemberTable({
       }
       return a.id - b.id;
     });
-  const overLimitMemberIds = new Set(eligibleMembers.slice(5).map((member) => member.id));
+  const overLimitMemberIds = new Set(eligibleMembers.slice(7).map((member) => member.id));
 
   return (
     <>

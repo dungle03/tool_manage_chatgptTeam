@@ -8,11 +8,11 @@ from app.models import Invite, Member, Workspace
 from app.schemas import WorkspaceImportRequest
 from app.services.chatgpt import chatgpt_service
 from app.services.workspace_sync import (
+    build_workspace_list_payload,
     parse_datetime,
     schedule_followup_sync,
     serialize_datetime,
     sync_workspace_data,
-    workspace_to_dict,
 )
 
 router = APIRouter()
@@ -29,7 +29,7 @@ async def get_workspaces(
     _token: str = Depends(verify_admin_token),
 ):
     rows = session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
-    return [workspace_to_dict(row, session) for row in rows]
+    return build_workspace_list_payload(rows, session)
 
 
 @router.post("/api/teams/import")
