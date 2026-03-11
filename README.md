@@ -1,52 +1,52 @@
 # ChatGPT Workspace Manager
 
-A unified dashboard for managing multiple **ChatGPT Team** workspaces from one place.
+Dashboard hợp nhất để quản lý nhiều **workspace ChatGPT Team** trong một nơi.
 
-You can import teams, inspect members, manage invites, remove members, manually sync data, and receive near-realtime dashboard updates through **SSE + Realtime Sync V2**.
+Bạn có thể import team, xem thành viên, quản lý invite, xóa member, sync dữ liệu thủ công và nhận cập nhật gần realtime qua **SSE + Realtime Sync V2**.
 
 ---
 
-## Features
+## Tính năng chính
 
-### Workspace operations
-- Import a team with `access_token` or `session_token`
-- View all workspaces in one dashboard
-- Delete a workspace from local management
-- See team seat usage, sync state, and expiration date
+### Quản lý workspace
+- Import team bằng `access_token` hoặc `session_token`
+- Xem tất cả workspace trên một dashboard duy nhất
+- Xóa workspace khỏi danh sách quản lý cục bộ
+- Hiển thị số ghế đã dùng, trạng thái sync và ngày hết hạn team
 
-### Member management
-- View members per workspace
-- Display member join date in `dd/mm/yyyy`
-- Remove members with confirmation flow
-- Surface role and over-limit member states in the UI
+### Quản lý thành viên
+- Xem danh sách thành viên theo từng workspace
+- Hiển thị ngày tham gia member theo định dạng `dd/mm/yyyy`
+- Xóa member với luồng xác nhận rõ ràng
+- Hiển thị role và đánh dấu member vượt giới hạn ghế trên UI
 
-### Invite management
-- Invite a new member by email
-- Resend a pending invite
-- Cancel a pending invite
-- Track pending invites per workspace
+### Quản lý invite
+- Mời member mới bằng email
+- Gửi lại invite đang chờ
+- Hủy invite đang chờ
+- Theo dõi số invite pending theo từng workspace
 
 ### Realtime Sync V2
-- Background sync worker started with FastAPI lifespan
-- Smart scheduler using hot queue + follow-up sync windows
-- Priority-based sync behavior for hot workspaces and pending invites
-- Server-Sent Events for dashboard updates
-- Frontend event handling for:
+- Background sync worker khởi động cùng FastAPI lifespan
+- Scheduler thông minh dùng cơ chế hot queue + follow-up sync
+- Ưu tiên sync cho workspace đang “hot” hoặc có pending invites
+- Dùng Server-Sent Events (SSE) để cập nhật dashboard
+- Frontend xử lý các event:
   - `sync_started`
   - `workspace_updated`
   - `sync_failed`
   - `workspace_scheduled`
   - `heartbeat`
 
-### UI highlights
-- Dark premium dashboard UI
-- Animated SVG chevron for workspace expand/collapse
-- Team expiration date shown below workspace name
-- Sync status, hot state, and sync reason surfaced in workspace cards
+### Điểm nổi bật giao diện
+- Dashboard dark mode theo phong cách hiện đại
+- Icon SVG chevron có animation xoay cho phần expand/collapse workspace
+- Hiển thị ngày hết hạn team ngay dưới tên workspace
+- Hiển thị trạng thái sync, hot state và sync reason ngay trên workspace card
 
 ---
 
-## Architecture
+## Kiến trúc hệ thống
 
 ```text
 Frontend (Next.js) -> Backend API (FastAPI) -> ChatGPT Internal API
@@ -58,7 +58,7 @@ Frontend (Next.js) -> Backend API (FastAPI) -> ChatGPT Internal API
                          +-> SSE Event Stream
 ```
 
-### Main project structure
+### Cấu trúc thư mục chính
 
 ```text
 tool_manage_chatgptTeam/
@@ -85,21 +85,21 @@ tool_manage_chatgptTeam/
 
 ---
 
-## Tech Stack
+## Công nghệ sử dụng
 
-| Layer | Technology |
-|------|------------|
+| Tầng | Công nghệ |
+|------|-----------|
 | Frontend | Next.js 14, React 18, TypeScript |
 | Styling | Vanilla CSS |
 | Backend | FastAPI, SQLAlchemy, Pydantic |
-| Database | SQLite (dev), PostgreSQL-ready |
+| Database | SQLite (dev), sẵn sàng cho PostgreSQL |
 | Realtime | Server-Sent Events (SSE) |
-| Backend tests | pytest |
-| Frontend tests | Vitest, Testing Library |
+| Test backend | pytest |
+| Test frontend | Vitest, Testing Library |
 
 ---
 
-## Quick Start
+## Hướng dẫn chạy nhanh
 
 ## 1) Backend
 
@@ -109,15 +109,15 @@ backend\venv\Scripts\activate
 pip install -r backend/requirements.txt
 ```
 
-Create `backend/.env` from `backend/.env.example` and adjust values if needed.
+Tạo file `backend/.env` từ `backend/.env.example` rồi chỉnh lại giá trị nếu cần.
 
-Run the API:
+Chạy API:
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-> Run this command from the `backend/` directory.
+> Hãy chạy lệnh này trong thư mục `backend/`.
 
 ## 2) Frontend
 
@@ -127,54 +127,54 @@ npm install
 npm run dev
 ```
 
-Open: [http://localhost:3000](http://localhost:3000)
+Mở trình duyệt tại: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## Environment Variables
+## Biến môi trường
 
 ### Backend (`backend/.env`)
 
-| Variable | Default | Purpose |
-|---------|---------|---------|
-| `DATABASE_URL` | `sqlite:///./workspace_manager.db` | Database connection string |
-| `SYNC_LOOP_INTERVAL_SECONDS` | `5` | Background loop interval |
-| `SYNC_STALE_MINUTES` | `5` | Legacy stale threshold |
-| `SYNC_PENDING_INVITE_SECONDS` | `15` | Faster checks for pending invites |
-| `SYNC_BASELINE_MINUTES` | `5` | Baseline refresh cadence |
-| `SYNC_HOT_WINDOW_SECONDS` | `180` | How long a workspace stays hot |
-| `SYNC_FOLLOWUP_STEPS` | `5,15,30,60` | Follow-up sync schedule after key actions |
-| `SYNC_ERROR_RETRY_STEPS` | `10,30,60` | Retry schedule after sync failure |
-| `SYNC_MAX_PARALLEL_WORKSPACES` | `2` | Max concurrent workspace sync jobs |
-| `ADMIN_TOKEN` | _unset_ | Protect backend API |
+| Biến | Mặc định | Mục đích |
+|------|----------|----------|
+| `DATABASE_URL` | `sqlite:///./workspace_manager.db` | Chuỗi kết nối database |
+| `SYNC_LOOP_INTERVAL_SECONDS` | `5` | Chu kỳ chạy vòng lặp nền |
+| `SYNC_STALE_MINUTES` | `5` | Ngưỡng stale cũ |
+| `SYNC_PENDING_INVITE_SECONDS` | `15` | Tăng tần suất check khi có invite pending |
+| `SYNC_BASELINE_MINUTES` | `5` | Chu kỳ refresh nền cơ bản |
+| `SYNC_HOT_WINDOW_SECONDS` | `180` | Thời gian workspace được giữ ở trạng thái hot |
+| `SYNC_FOLLOWUP_STEPS` | `5,15,30,60` | Các mốc follow-up sync sau action quan trọng |
+| `SYNC_ERROR_RETRY_STEPS` | `10,30,60` | Các mốc retry sau khi sync lỗi |
+| `SYNC_MAX_PARALLEL_WORKSPACES` | `2` | Số workspace sync song song tối đa |
+| `ADMIN_TOKEN` | _chưa đặt_ | Bảo vệ API backend |
 
 ### Frontend (`frontend/.env.local`)
 
-| Variable | Purpose |
-|---------|---------|
-| `NEXT_PUBLIC_ADMIN_TOKEN` | Sends auth token to the backend from the dashboard |
+| Biến | Mục đích |
+|------|----------|
+| `NEXT_PUBLIC_ADMIN_TOKEN` | Gửi token xác thực từ dashboard lên backend |
 
 ---
 
-## API Overview
+## Tổng quan API
 
-| Method | Endpoint | Description |
-|------|----------|-------------|
-| `GET` | `/api/workspaces` | List all managed workspaces |
-| `POST` | `/api/teams/import` | Import one or more teams from token data |
-| `GET` | `/api/workspaces/{id}/members` | List workspace members |
-| `GET` | `/api/workspaces/{id}/sync` | Trigger a manual sync |
-| `DELETE` | `/api/workspaces/{id}` | Delete a managed workspace |
-| `POST` | `/api/invite` | Invite a member |
-| `GET` | `/api/invites?org_id=...` | List pending invites |
-| `POST` | `/api/resend-invite` | Resend an invite |
-| `DELETE` | `/api/cancel-invite` | Cancel an invite |
-| `DELETE` | `/api/member` | Remove a member |
-| `GET` | `/api/events/workspaces` | Open SSE stream for workspace events |
+| Method | Endpoint | Mô tả |
+|--------|----------|------|
+| `GET` | `/api/workspaces` | Lấy danh sách workspace đang quản lý |
+| `POST` | `/api/teams/import` | Import một hoặc nhiều team từ token |
+| `GET` | `/api/workspaces/{id}/members` | Lấy danh sách member của workspace |
+| `GET` | `/api/workspaces/{id}/sync` | Kích hoạt manual sync |
+| `DELETE` | `/api/workspaces/{id}` | Xóa workspace khỏi hệ thống quản lý |
+| `POST` | `/api/invite` | Mời member mới |
+| `GET` | `/api/invites?org_id=...` | Lấy danh sách invite đang chờ |
+| `POST` | `/api/resend-invite` | Gửi lại invite |
+| `DELETE` | `/api/cancel-invite` | Hủy invite |
+| `DELETE` | `/api/member` | Xóa member khỏi workspace |
+| `GET` | `/api/events/workspaces` | Mở SSE stream cho event workspace |
 
 ---
 
-## Running Tests
+## Chạy test
 
 ### Frontend
 
@@ -191,46 +191,46 @@ cd backend
 python -m pytest backend/tests
 ```
 
-> Note: there has been a recent case where the full backend pytest run stayed active much longer than expected. If that happens again, inspect the hanging test or background worker lifecycle before deploying.
+> Lưu ý: gần đây đã có trường hợp lệnh pytest backend chạy lâu bất thường. Nếu hiện tượng này lặp lại, nên kiểm tra test đang treo hoặc vòng đời background worker trước khi deploy production.
 
 ---
 
-## Authentication
+## Xác thực
 
-When `ADMIN_TOKEN` is configured on the backend, all protected endpoints require:
+Khi `ADMIN_TOKEN` được cấu hình ở backend, các endpoint được bảo vệ sẽ yêu cầu header:
 
 ```http
 Authorization: Bearer <your-token>
 ```
 
-For browser SSE usage, the frontend can append `admin_token` as a query parameter when needed.
+Với SSE trên trình duyệt, frontend có thể truyền `admin_token` qua query parameter khi cần.
 
 ---
 
-## Current Status
+## Trạng thái hiện tại
 
-The project currently includes:
-- a working management dashboard
-- member and invite operations
-- Realtime Sync V2 scheduling
-- SSE-driven dashboard updates
-- polished workspace card UI
+Dự án hiện đã có:
+- dashboard quản lý workspace hoạt động tốt
+- các thao tác member và invite
+- Realtime Sync V2
+- dashboard cập nhật bằng SSE
+- UI workspace card đã được polish thêm
 
-It is in a good state for **demo, staging, and small production/internal usage**, with the main known issue being the need to investigate the unusually long backend test run.
-
----
-
-## Known Limitations
-
-- SSE broker is currently in-memory, so it is best suited for single-instance deployment.
-- Full backend pytest runtime needs further investigation.
-- For larger scale deployments, a shared pub/sub layer such as Redis would be a stronger realtime foundation.
+Hiện trạng phù hợp để dùng cho **demo, staging và production quy mô nhỏ/nội bộ**, với vấn đề lớn nhất còn cần điều tra là thời gian chạy test backend quá lâu trong một số trường hợp.
 
 ---
 
-## Recommended Next Steps
+## Giới hạn hiện tại
 
-1. Investigate the hanging backend test run
-2. Re-run backend and frontend tests cleanly
-3. Deploy to staging
-4. If multi-instance scale is needed, upgrade realtime broker infrastructure
+- SSE broker hiện đang là in-memory nên phù hợp nhất cho single-instance deployment.
+- Thời gian chạy full backend pytest vẫn cần điều tra thêm.
+- Nếu muốn scale nhiều instance, nên nâng cấp hạ tầng realtime sang Redis pub/sub hoặc message broker tương đương.
+
+---
+
+## Bước tiếp theo được khuyến nghị
+
+1. Điều tra nguyên nhân backend test bị treo lâu
+2. Chạy lại test backend và frontend một lần sạch
+3. Deploy lên staging
+4. Nếu cần scale nhiều instance, nâng cấp tầng realtime broker
