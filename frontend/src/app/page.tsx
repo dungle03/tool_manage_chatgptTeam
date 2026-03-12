@@ -608,7 +608,9 @@ export default function DashboardPage() {
     (sum, workspace) => sum + (workspace.pending_invites ?? 0),
     0
   );
-  const syncErrors = workspaces.filter((workspace) => workspace.status === "error").length;
+  const totalCapacity = workspaces.length * 7;
+  const availableSlots = Math.max(totalCapacity - totalMembers, 0);
+  // const syncErrors = workspaces.filter((workspace) => workspace.status === "error").length;
   const sortedWorkspaces = useMemo(
     () => [...workspaces].sort(compareWorkspaceExpiry),
     [workspaces]
@@ -635,11 +637,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* syncErrors is intentionally commented out while the Health card is hidden.
+          syncErrors={syncErrors} */}
       <DashboardSummary
         totalTeams={workspaces.length}
         totalMembers={totalMembers}
+        availableSlots={availableSlots}
         pendingInvites={totalPending}
-        syncErrors={syncErrors}
       />
 
       {loading && (

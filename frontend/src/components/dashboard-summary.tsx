@@ -9,11 +9,13 @@ function SummaryIcon({ path }: { path: string }) {
 export function DashboardSummary(props: {
   totalTeams: number;
   totalMembers: number;
+  availableSlots: number;
   pendingInvites: number;
-  syncErrors: number;
 }) {
-  const healthLabel = props.syncErrors > 0 ? "Needs attention" : "Stable";
-
+  // Health is temporarily hidden to keep the summary grid balanced.
+  // If we want to show it again later, restore both:
+  // 1) the syncErrors prop passed from page.tsx
+  // 2) the Health item inside the items array below
   const items = [
     {
       icon: <SummaryIcon path="M4 7h16M7 4v6m10-6v6M5 11h14a1 1 0 0 1 1 1v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a1 1 0 0 1 1-1Z" />,
@@ -30,18 +32,18 @@ export function DashboardSummary(props: {
       tone: "success",
     },
     {
+      icon: <SummaryIcon path="M3 11.5L12 4l9 7.5M5 10v8h14v-8M9 18v-4h6v4" />,
+      label: "Available Slots",
+      value: props.availableSlots,
+      meta: "Empty seats remaining",
+      tone: "accent",
+    },
+    {
       icon: <SummaryIcon path="M12 3l1.9 3.86L18 8.1l-3 2.93l.71 4.12L12 13.2l-3.71 1.95L9 11.03L6 8.1l4.1-.24L12 3Z" />,
       label: "Pending",
       value: props.pendingInvites,
       meta: "Invites waiting response",
       tone: "warning",
-    },
-    {
-      icon: <SummaryIcon path="M20 13.5A8.38 8.38 0 0 1 12 20a8 8 0 1 1 7.9-9.32M12 8l-1.2 3H8l3 2.2L9.8 16L12 13.8L14.2 16L13 13.2L16 11h-2.8L12 8Z" />,
-      label: "Health",
-      value: healthLabel,
-      meta: props.syncErrors > 0 ? `${props.syncErrors} sync issue(s)` : "All systems normal",
-      tone: props.syncErrors > 0 ? "danger" : "success",
     },
   ];
 
