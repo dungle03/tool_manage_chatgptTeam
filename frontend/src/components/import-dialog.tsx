@@ -18,7 +18,7 @@ type ImportDialogProps = {
 type Tab = "session" | "access";
 
 export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
-  const [tab, setTab] = useState<Tab>("session");
+  const [tab, setTab] = useState<Tab>("access");
   const [sessionToken, setSessionToken] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [loading, setLoading] = useState(false);
@@ -113,16 +113,16 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
           <>
             <div className="import-tab-bar">
               <button
-                className={`import-tab${tab === "session" ? " active" : ""}`}
-                onClick={() => setTab("session")}
-              >
-                Session Token
-              </button>
-              <button
                 className={`import-tab${tab === "access" ? " active" : ""}`}
                 onClick={() => setTab("access")}
               >
                 Access Token
+              </button>
+              <button
+                className={`import-tab${tab === "session" ? " active" : ""}`}
+                onClick={() => setTab("session")}
+              >
+                Session Token
               </button>
             </div>
 
