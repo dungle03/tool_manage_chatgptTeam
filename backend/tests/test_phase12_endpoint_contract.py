@@ -28,3 +28,37 @@ def test_workspace_sync_endpoint_has_phase2_shape(client, seed_data):
     assert response.status_code == 502
     body = response.json()
     assert body["detail"]
+
+
+def test_workspace_import_returns_richer_contract(client, monkeypatch):
+    async def fake_get_account_info(_self, _access_token):
+        return [
+            {
+                "account_id": "org_import_1",
+                "name": "Imported Team",
+                "member_limit": 12,
+                "expires_at": None,
+            }
+        ]
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info)
+
+    response = client.post(
+        "/api/teams/import",
+        json={"access_token": "token-123"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["action"] == "workspace_import"
+    assert body["refresh_hint"]["scope"] == "workspace_list"
+    assert body["refresh_hint"]["reason"] == "workspace_imported"
+    assert body["refresh_hint"]["include_details"] is False
+    assert body["imported"] == [
+        {"id": 1, "org_id": "org_import_1", "name": "Imported Team"}
+    ]
+    assert len(body["updated_records"]) == 1
+    assert body["updated_records"][0]["org_id"] == "org_import_1"
+    assert body["updated_records"][0]["name"] == "Imported Team"
+    assert body["updated_records"][0]["status"] == "live"

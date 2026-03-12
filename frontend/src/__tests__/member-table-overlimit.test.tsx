@@ -147,23 +147,23 @@ describe("MemberTable over-limit classification", () => {
     expect(screen.getByText("member9@team.test").closest("tr")).toHaveClass("member-overlimit-row");
   });
 
-  it("uses remote_id tie-break when created_at is equal", () => {
+  it("uses role priority tie-break when join date is equal", () => {
     const sameDate = "2026-03-10T00:00:00Z";
     const members = [
-      makeMember({ id: 1, remote_id: "u-z", email: "z@x.com", created_at: sameDate }),
-      makeMember({ id: 2, remote_id: "u-a", email: "a@x.com", created_at: sameDate }),
-      makeMember({ id: 3, remote_id: "u-b", email: "b@x.com", created_at: sameDate }),
-      makeMember({ id: 4, remote_id: "u-c", email: "c@x.com", created_at: sameDate }),
-      makeMember({ id: 5, remote_id: "u-d", email: "d@x.com", created_at: sameDate }),
-      makeMember({ id: 6, remote_id: "u-e", email: "e@x.com", created_at: sameDate }),
-      makeMember({ id: 7, remote_id: "u-f", email: "f@x.com", created_at: sameDate }),
-      makeMember({ id: 8, remote_id: "u-g", email: "g@x.com", created_at: sameDate }),
+      makeMember({ id: 1, role: "user", email: "user1@x.com", created_at: sameDate }),
+      makeMember({ id: 2, role: "admin", email: "admin1@x.com", created_at: sameDate }),
+      makeMember({ id: 3, role: "user", email: "user2@x.com", created_at: sameDate }),
+      makeMember({ id: 4, role: "owner", email: "owner1@x.com", created_at: sameDate }),
+      makeMember({ id: 5, role: "user", email: "user3@x.com", created_at: sameDate }),
+      makeMember({ id: 6, role: "admin", email: "admin2@x.com", created_at: sameDate }),
+      makeMember({ id: 7, role: "user", email: "user4@x.com", created_at: sameDate }),
+      makeMember({ id: 8, role: "user", email: "user5@x.com", created_at: sameDate }),
     ];
 
     render(<MemberTable members={members} />);
 
-    expect(screen.getByText("z@x.com").closest("tr")).toHaveClass("member-overlimit-row");
-    expect(screen.getByText("g@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+    expect(screen.getByText("user5@x.com").closest("tr")).toHaveClass("member-overlimit-row");
+    expect(screen.getByText("owner1@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
   });
 
   it("uses id tie-break when created_at and remote_id are equal", () => {

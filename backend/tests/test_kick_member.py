@@ -14,4 +14,14 @@ def test_kick_member_sets_removed_status(client, seed_data, monkeypatch):
     payload = {"org_id": "org_001", "member_id": 1}
     response = client.request("DELETE", "/api/member", json=payload)
     assert response.status_code == 200
-    assert response.json()["status"] == "removed"
+
+    body = response.json()
+    assert body["ok"] is True
+    assert body["action"] == "member_kick"
+    assert body["status"] == "removed"
+    assert body["updated_record"]["id"] == 1
+    assert body["updated_record"]["status"] == "removed"
+    assert body["updated_summary"]["org_id"] == "org_001"
+    assert body["refresh_hint"]["scope"] == "workspace_detail"
+    assert body["refresh_hint"]["reason"] == "member_kicked"
+    assert body["refresh_hint"]["include_details"] is True
