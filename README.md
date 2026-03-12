@@ -94,7 +94,8 @@ tool_manage_chatgptTeam/
 │  └─ package.json
 ├─ docs/
 │  ├─ DESIGN.md
-│  └─ PROJECT_REVIEW_20260312.md
+│  ├─ PROJECT_REVIEW_20260312.md
+│  └─ SYNC_RUNBOOK.md
 ├─ run_backend_tests.ps1
 └─ README.md
 ```
@@ -146,6 +147,8 @@ python -m pytest tests -vv
 ```
 
 Dự án hiện đã có `run_backend_tests.ps1` để chuẩn hóa việc chạy backend test trong đúng working directory.
+
+Nếu đang sửa luồng realtime/SSE, nên đọc thêm `docs/SYNC_RUNBOOK.md` để biết file cần kiểm tra và cách verify theo nhánh frontend/backend.
 
 ---
 
@@ -206,6 +209,18 @@ Mở trình duyệt tại [http://localhost:3000](http://localhost:3000).
 | Biến | Mục đích |
 |------|----------|
 | `NEXT_PUBLIC_ADMIN_TOKEN` | Token frontend gửi sang backend |
+
+### Lệnh verify nhanh cho realtime/sync
+
+```powershell
+# Frontend realtime helper
+cd frontend
+npm test -- workspace-events.test.ts
+
+# Backend sync/realtime regression
+cd ..
+pytest backend/tests/test_realtime_sync.py -q
+```
 
 ---
 
@@ -271,6 +286,7 @@ python -m pytest tests -vv
 Bản review mới nhất nằm tại:
 
 - [docs/PROJECT_REVIEW_20260312.md](file:///D:/laptrinh/laptrinh/code/LinhTinh/tool_manage_chatgptTeam/docs/PROJECT_REVIEW_20260312.md)
+- `docs/SYNC_RUNBOOK.md` cho hướng dẫn sync/debug vận hành nhanh
 
 Kết luận ở mức cao:
 - Product đã đủ tính năng cho phạm vi nội bộ hiện tại
@@ -294,6 +310,7 @@ Kết luận ở mức cao:
 - Thêm Redis/pub-sub nếu cần realtime multi-instance
 - Bổ sung test end-to-end cho SSE và sync scheduling
 - Viết thêm tài liệu deploy cho môi trường staging/production
+- Dùng `docs/SYNC_RUNBOOK.md` làm điểm bắt đầu khi debug sync/realtime
 - Cân nhắc chuyển sang PostgreSQL nếu cần dùng chung ở quy mô lớn hơn
 
 ---
