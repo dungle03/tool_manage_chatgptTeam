@@ -439,7 +439,14 @@ export default function DashboardPage() {
     updateWsState(orgId, { syncing: true });
     try {
       await syncWorkspace(orgId);
-      void triggerPostActionRefresh(orgId, { includeDetails: true });
+      const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
+
+      if (state.loadedMembers) {
+        void triggerPostActionRefresh(orgId, { includeDetails: true });
+      } else {
+        await loadMembers(orgId);
+      }
+
       showToast(
         "Đồng bộ hoàn tất",
         `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`,
@@ -685,8 +692,7 @@ export default function DashboardPage() {
                 if (
                   expanded &&
                   !state.loadedMembers &&
-                  (Boolean(ws.last_sync) || ws.member_count > 0) &&
-                  !state.syncing
+                  (Boolean(ws.last_sync) || ws.member_count > 0)
                 ) {
                   void loadMembers(ws.org_id);
                 }
@@ -698,14 +704,18 @@ export default function DashboardPage() {
                       <div className="section-heading-row compact-heading-row">
                         <div>
                           <h3 className="section-heading">
-                            {ws.last_sync || ws.member_count > 0
-                              ? "Đang tải dữ liệu workspace"
-                              : "Workspace data chưa được tải"}
+                            {state.syncing
+                              ? "Workspace đang đồng bộ dữ liệu"
+                              : ws.last_sync || ws.member_count > 0
+                                ? "Đang tải chi tiết workspace"
+                                : "Workspace data chưa được tải"}
                           </h3>
                           <p className="section-description">
-                            {ws.last_sync || ws.member_count > 0
-                              ? "Đang đọc dữ liệu local đã sync trước đó để hiển thị members và invites."
-                              : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
+                            {state.syncing
+                              ? "Hệ thống đang sync workspace rồi tải members và invites mới nhất."
+                              : ws.last_sync || ws.member_count > 0
+                                ? "Đang đọc dữ liệu members và invites đã sync trước đó để hiển thị chi tiết workspace."
+                                : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
                           </p>
                           {ws.sync_error && (
                             <p
@@ -725,11 +735,13 @@ export default function DashboardPage() {
                           flexWrap: "wrap",
                         }}
                       >
-                        {ws.last_sync || ws.member_count > 0 ? (
+                        {ws.last_sync || ws.member_count > 0 || state.syncing ? (
                           <>
                             <div className="loading-spinner" />
                             <span className="workspace-helper-copy">
-                              Đang tải dữ liệu cục bộ của workspace...
+                              {state.syncing
+                                ? "Đang đồng bộ và tải chi tiết workspace..."
+                                : "Đang tải dữ liệu chi tiết của workspace..."}
                             </span>
                           </>
                         ) : (
