@@ -2,10 +2,17 @@
 
 import { useState } from "react";
 import { importTeam, syncWorkspace } from "@/lib/api";
+import type { RefreshHint, Workspace } from "@/types/api";
+
+type ImportDialogResult = {
+  importedOrgId: string | null;
+  updatedRecords: Workspace[];
+  refreshHint?: RefreshHint;
+};
 
 type ImportDialogProps = {
   onClose: () => void;
-  onImported: (orgId: string) => void;
+  onImported: (result: ImportDialogResult) => void;
 };
 
 type Tab = "session" | "access";
@@ -18,6 +25,8 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<"input" | "syncing" | "done">("input");
   const [imported, setImported] = useState<{ org_id: string; name: string }[]>([]);
+  const [updatedRecords, setUpdatedRecords] = useState<Workspace[]>([]);
+  const [refreshHint, setRefreshHint] = useState<RefreshHint | undefined>(undefined);
 
   async function handleImport() {
     const payload =
@@ -44,9 +53,10 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
       }
 
       setImported(importedList);
+      setUpdatedRecords(res.updated_records ?? res.updated_record ?? []);
+      setRefreshHint(res.refresh_hint);
       setStep("syncing");
 
-      // Auto-sync each imported workspace
       for (const ws of importedList) {
         try {
           await syncWorkspace(ws.org_id);
@@ -59,7 +69,6 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : "Có lỗi xảy ra.";
 
-      // Dịch lỗi kỹ thuật sang tiếng thường
       let friendlyMsg = rawMsg;
       if (rawMsg.includes("ECONNREFUSED") || rawMsg.includes("fetch") || rawMsg.includes("Failed to fetch")) {
         friendlyMsg = "Không kết nối được tới backend (port 8000). Hãy đảm bảo đã chạy: uvicorn app.main:app --reload";
@@ -72,16 +81,17 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
       }
 
       setError(friendlyMsg);
-
     } finally {
       setLoading(false);
     }
   }
 
   function handleDone() {
-    if (imported.length > 0) {
-      onImported(imported[0].org_id);
-    }
+    onImported({
+      importedOrgId: imported[0]?.org_id ?? null,
+      updatedRecords,
+      refreshHint,
+    });
     onClose();
   }
 
@@ -94,7 +104,6 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
         aria-modal="true"
         aria-label="Import ChatGPT Team"
       >
-        {/* Header */}
         <div className="import-dialog-header">
           <h3>🔑 Import ChatGPT Team</h3>
           <button onClick={onClose} className="import-dialog-close" aria-label="Đóng">✕</button>
@@ -102,7 +111,6 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
 
         {step === "input" && (
           <>
-            {/* Tab selector */}
             <div className="import-tab-bar">
               <button
                 className={`import-tab${tab === "session" ? " active" : ""}`}

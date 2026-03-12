@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { Member } from "@/types/api";
 
 function roleTone(role: string) {
@@ -13,6 +13,19 @@ function roleTone(role: string) {
     case "member":
     default:
       return { label: "User", className: "role-user" };
+  }
+}
+
+function rolePriority(role: string): number {
+  switch (role.trim().toLowerCase()) {
+    case "owner":
+      return 0;
+    case "admin":
+      return 1;
+    case "user":
+    case "member":
+    default:
+      return 2;
   }
 }
 
@@ -53,15 +66,49 @@ function formatJoinDate(createdAt: string | null, inviteDate: string | null): st
   return `Tham gia: ${day}/${month}/${year}`;
 }
 
-export function MemberTable({
-  members,
-  busyMemberIds = [],
-  onKick,
-}: {
+function compareMembersByDisplayOrder(a: Member, b: Member): number {
+  const joinedAtA = parseCreatedAtTimestamp(a.created_at ?? a.invite_date);
+  const joinedAtB = parseCreatedAtTimestamp(b.created_at ?? b.invite_date);
+
+  if (joinedAtA !== null && joinedAtB !== null && joinedAtA !== joinedAtB) {
+    return joinedAtA - joinedAtB;
+  }
+  if (joinedAtA !== null && joinedAtB === null) {
+    return -1;
+  }
+  if (joinedAtA === null && joinedAtB !== null) {
+    return 1;
+  }
+
+  const roleDelta = rolePriority(a.role) - rolePriority(b.role);
+  if (roleDelta !== 0) {
+    return roleDelta;
+  }
+
+  const remoteIdA = a.remote_id ?? "";
+  const remoteIdB = b.remote_id ?? "";
+  if (remoteIdA !== remoteIdB) {
+    return remoteIdA.localeCompare(remoteIdB);
+  }
+
+  if (a.email !== b.email) {
+    return a.email.localeCompare(b.email);
+  }
+
+  return a.id - b.id;
+}
+
+type MemberTableProps = {
   members: Member[];
   busyMemberIds?: number[];
   onKick?: (memberId: number) => Promise<void>;
-}) {
+};
+
+function MemberTableComponent({
+  members,
+  busyMemberIds = [],
+  onKick,
+}: MemberTableProps) {
   const [target, setTarget] = useState<Member | null>(null);
   const [kicking, setKicking] = useState(false);
 
@@ -76,6 +123,12 @@ export function MemberTable({
     }
   }
 
+  const sortedMembers = useMemo(
+    () => [...members].sort(compareMembersByDisplayOrder),
+    [members]
+  );
+  const busyMemberIdSet = useMemo(() => new Set(busyMemberIds), [busyMemberIds]);
+
   if (members.length === 0) {
     return (
       <div className="empty-state compact-empty-state">
@@ -85,27 +138,16 @@ export function MemberTable({
     );
   }
 
-  const eligibleMembers = members
+  const eligibleMembers = sortedMembers
+    .filter((member) => isActiveMember(member.status))
     .map((member) => {
-      if (!isActiveMember(member.status)) return null;
-      const createdAtTimestamp = parseCreatedAtTimestamp(member.created_at);
-      if (createdAtTimestamp === null) return null;
+      const joinedAtTimestamp = parseCreatedAtTimestamp(member.created_at ?? member.invite_date);
+      if (joinedAtTimestamp === null) return null;
       return {
         id: member.id,
-        remoteId: member.remote_id ?? "",
-        createdAtTimestamp,
       };
     })
-    .filter((member): member is { id: number; remoteId: string; createdAtTimestamp: number } => member !== null)
-    .sort((a, b) => {
-      if (a.createdAtTimestamp !== b.createdAtTimestamp) {
-        return a.createdAtTimestamp - b.createdAtTimestamp;
-      }
-      if (a.remoteId !== b.remoteId) {
-        return a.remoteId.localeCompare(b.remoteId);
-      }
-      return a.id - b.id;
-    });
+    .filter((member): member is { id: number } => member !== null);
   const overLimitMemberIds = new Set(eligibleMembers.slice(7).map((member) => member.id));
 
   return (
@@ -129,7 +171,7 @@ export function MemberTable({
             </tr>
           </thead>
           <tbody>
-            {members.map((member) => {
+            {sortedMembers.map((member) => {
               const isOwner = member.role.toLowerCase() === "owner";
               const role = roleTone(member.role);
               const displayName = member.name || "No name";
@@ -158,7 +200,7 @@ export function MemberTable({
                       {isOwner || !onKick ? (
                         <span className="action-pill action-pill-protected">Protected</span>
                       ) : (() => {
-                        const isBusy = busyMemberIds.includes(member.id);
+                        const isBusy = busyMemberIdSet.has(member.id);
 
                         return (
                           <button
@@ -200,3 +242,5 @@ export function MemberTable({
     </>
   );
 }
+
+export const MemberTable = memo(MemberTableComponent);

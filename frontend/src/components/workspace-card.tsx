@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, ReactNode } from "react";
+import { memo, useState, ReactNode } from "react";
 
 type WorkspaceCardProps = {
   title: string;
@@ -57,7 +57,7 @@ function formatExpiryDate(expiresAt?: string | null): string {
   return `Hết hạn: ${day}/${month}/${year}`;
 }
 
-export function WorkspaceCard({
+function WorkspaceCardComponent({
   title,
   members,
   memberLimit,
@@ -176,3 +176,5 @@ export function WorkspaceCard({
     </section>
   );
 }
+
+export const WorkspaceCard = memo(WorkspaceCardComponent);

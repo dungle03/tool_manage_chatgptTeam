@@ -1,9 +1,14 @@
-import type { Member, Workspace, Invite, WorkspaceEvent } from "@/types/api";
-
-type ImportedWorkspace = { id: number; org_id: string; name: string };
-type ImportTeamResponse = { imported: ImportedWorkspace[] };
-type SyncWorkspaceResponse = { ok: boolean; members_synced: number; invites_synced: number; last_sync: string };
-type MutationResponse = { ok: boolean; [key: string]: unknown };
+import type {
+  Invite,
+  InviteMutationResult,
+  Member,
+  MemberMutationResult,
+  Workspace,
+  WorkspaceDeleteResult,
+  WorkspaceEvent,
+  WorkspaceImportResult,
+  WorkspaceSyncResult,
+} from "@/types/api";
 
 // Lấy admin token từ env (nếu có), dev mode không cần
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
@@ -25,8 +30,8 @@ export async function getWorkspaceMembers(orgId: string): Promise<Member[]> {
   return requestJson(`/api/workspaces/${orgId}/members`, "GET");
 }
 
-export async function syncWorkspace(orgId: string): Promise<SyncWorkspaceResponse> {
-  return requestJson<SyncWorkspaceResponse>(`/api/workspaces/${orgId}/sync`, "GET");
+export async function syncWorkspace(orgId: string): Promise<WorkspaceSyncResult> {
+  return requestJson<WorkspaceSyncResult>(`/api/workspaces/${orgId}/sync`, "GET");
 }
 
 export async function importTeam(payload: {
@@ -34,32 +39,32 @@ export async function importTeam(payload: {
   session_token?: string;
   org_id?: string;
   name?: string;
-}): Promise<ImportTeamResponse> {
-  return requestJson<ImportTeamResponse>("/api/teams/import", "POST", payload);
+}): Promise<WorkspaceImportResult> {
+  return requestJson<WorkspaceImportResult>("/api/teams/import", "POST", payload);
 }
 
-export async function inviteMember(payload: { org_id: string; email: string; role?: string }): Promise<MutationResponse> {
-  return requestJson<MutationResponse>("/api/invite", "POST", payload);
+export async function inviteMember(payload: { org_id: string; email: string; role?: string }): Promise<InviteMutationResult> {
+  return requestJson<InviteMutationResult>("/api/invite", "POST", payload);
 }
 
-export async function kickMember(payload: { org_id: string; member_id: number }): Promise<MutationResponse> {
-  return requestJson<MutationResponse>("/api/member", "DELETE", payload);
+export async function kickMember(payload: { org_id: string; member_id: number }): Promise<MemberMutationResult> {
+  return requestJson<MemberMutationResult>("/api/member", "DELETE", payload);
 }
 
 export async function listInvites(orgId: string): Promise<Invite[]> {
   return requestJson<Invite[]>(`/api/invites?org_id=${orgId}`, "GET");
 }
 
-export async function resendInvite(payload: { org_id: string; invite_id: string }): Promise<MutationResponse> {
-  return requestJson<MutationResponse>("/api/resend-invite", "POST", payload);
+export async function resendInvite(payload: { org_id: string; invite_id: string }): Promise<InviteMutationResult> {
+  return requestJson<InviteMutationResult>("/api/resend-invite", "POST", payload);
 }
 
-export async function cancelInvite(payload: { org_id: string; invite_id: string; email?: string }): Promise<MutationResponse> {
-  return requestJson<MutationResponse>("/api/cancel-invite", "DELETE", payload);
+export async function cancelInvite(payload: { org_id: string; invite_id: string; email?: string }): Promise<InviteMutationResult> {
+  return requestJson<InviteMutationResult>("/api/cancel-invite", "DELETE", payload);
 }
 
-export async function deleteWorkspace(orgId: string): Promise<MutationResponse> {
-  return requestJson<MutationResponse>(`/api/workspaces/${orgId}`, "DELETE");
+export async function deleteWorkspace(orgId: string): Promise<WorkspaceDeleteResult> {
+  return requestJson<WorkspaceDeleteResult>(`/api/workspaces/${orgId}`, "DELETE");
 }
 
 export function invalidateApiCache() {

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Invite } from "@/types/api";
 
 function formatDate(dateStr?: string | null): string {
@@ -13,7 +14,7 @@ type InviteListProps = {
   onRevoke?: (inviteId: string) => Promise<void>;
 };
 
-export function InviteList({ invites, busyInviteActions = {}, onResend, onRevoke }: InviteListProps) {
+function InviteListComponent({ invites, busyInviteActions = {}, onResend, onRevoke }: InviteListProps) {
   if (invites.length === 0) return null;
 
   const canManageInvites = Boolean(onResend || onRevoke);
@@ -72,3 +73,5 @@ export function InviteList({ invites, busyInviteActions = {}, onResend, onRevoke
     </div>
   );
 }
+
+export const InviteList = memo(InviteListComponent);

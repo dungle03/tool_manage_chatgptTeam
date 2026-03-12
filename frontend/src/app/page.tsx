@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { DashboardSummary } from "@/components/dashboard-summary";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { MemberTable } from "@/components/member-table";
@@ -20,6 +20,15 @@ import {
   resendInvite,
   cancelInvite,
 } from "@/lib/api";
+import {
+  applyWorkspaceSummaryList,
+  compareWorkspaceExpiry,
+  mergeWorkspaceRecordList,
+  removeInvite,
+  removeMember,
+  replaceInvite,
+  upsertInvite,
+} from "@/lib/workspace-state";
 import type { Workspace, Member, Invite, WorkspaceEvent } from "@/types/api";
 
 type WorkspaceState = {
@@ -48,7 +57,7 @@ const DEFAULT_WS_STATE: WorkspaceState = {
   inviteActionState: {},
 };
 
-const EVENT_REFRESH_WINDOW_MS = 1200;
+const EVENT_REFRESH_WINDOW_MS = 450;
 
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -69,6 +78,9 @@ export default function DashboardPage() {
   const wsStatesRef = useRef<Record<string, WorkspaceState>>({});
   const loadWorkspacesRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null);
   const refreshWorkspaceDetailsRef = useRef<((orgId: string) => Promise<void>) | null>(null);
+  const triggerPostActionRefreshRef = useRef<
+    ((orgId?: string, options?: { immediate?: boolean; includeDetails?: boolean }) => Promise<void>) | null
+  >(null);
   const showToastRef = useRef<((title: string, message: string, tone?: ToastState["tone"], dedupeKey?: string) => void) | null>(null);
 
   function showToast(
@@ -111,6 +123,14 @@ export default function DashboardPage() {
     },
     []
   );
+
+  const applyWorkspaceSummary = useCallback((summary?: Partial<Workspace> | null) => {
+    setWorkspaces((prev) => applyWorkspaceSummaryList(prev, summary));
+  }, []);
+
+  const mergeWorkspaceRecord = useCallback((record?: Workspace | null) => {
+    setWorkspaces((prev) => mergeWorkspaceRecordList(prev, record));
+  }, []);
 
   const loadWorkspaces = useCallback(async (options?: { silent?: boolean }) => {
     try {
@@ -194,6 +214,36 @@ export default function DashboardPage() {
 
     detailRefreshTimersRef.current.set(orgId, timerId);
   }, []);
+
+  const triggerPostActionRefresh = useCallback(
+    async (
+      orgId?: string,
+      options?: { immediate?: boolean; includeDetails?: boolean }
+    ) => {
+      const includeDetails = options?.includeDetails ?? true;
+
+      if (options?.immediate) {
+        await loadWorkspacesRef.current?.({ silent: true });
+        if (orgId && includeDetails) {
+          const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
+          if (state.loadedMembers) {
+            await refreshWorkspaceDetailsRef.current?.(orgId);
+          }
+        }
+        return;
+      }
+
+      scheduleWorkspaceListRefresh();
+      if (orgId && includeDetails) {
+        scheduleWorkspaceDetailRefresh(orgId);
+      }
+    },
+    [scheduleWorkspaceDetailRefresh, scheduleWorkspaceListRefresh]
+  );
+
+  useEffect(() => {
+    triggerPostActionRefreshRef.current = triggerPostActionRefresh;
+  }, [triggerPostActionRefresh]);
 
   const handleWorkspaceEvent = useCallback((event: WorkspaceEvent) => {
     if (seenEventSequencesRef.current.has(event.sequence)) {
@@ -389,7 +439,7 @@ export default function DashboardPage() {
     updateWsState(orgId, { syncing: true });
     try {
       await syncWorkspace(orgId);
-      await loadMembers(orgId);
+      void triggerPostActionRefresh(orgId, { includeDetails: true });
       showToast(
         "Đồng bộ hoàn tất",
         `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`,
@@ -411,18 +461,15 @@ export default function DashboardPage() {
     }));
 
     try {
-      await kickMember({ org_id: orgId, member_id: memberId });
-      await loadMembers(orgId);
-      setWorkspaces((prev) =>
-        prev.map((workspace) =>
-          workspace.org_id === orgId
-            ? {
-                ...workspace,
-                member_count: Math.max(0, (workspace.member_count ?? 0) - 1),
-              }
-            : workspace
-        )
-      );
+      const result = await kickMember({ org_id: orgId, member_id: memberId });
+      const removedMemberId = result.member_id ?? memberId;
+      updateWsState(orgId, (current) => ({
+        members: removeMember(current.members, removedMemberId),
+      }));
+      applyWorkspaceSummary(result.updated_summary);
+      void triggerPostActionRefresh(orgId, {
+        includeDetails: result.refresh_hint?.include_details ?? true,
+      });
       showToast(
         "Đã xóa thành viên",
         "Thành viên đã được gỡ khỏi workspace thành công.",
@@ -450,8 +497,17 @@ export default function DashboardPage() {
     }));
 
     try {
-      await resendInvite({ org_id: orgId, invite_id: inviteId });
-      await loadMembers(orgId);
+      const result = await resendInvite({ org_id: orgId, invite_id: inviteId });
+      if (result.updated_record) {
+        const updatedInvite = result.updated_record;
+        updateWsState(orgId, (current) => ({
+          invites: replaceInvite(current.invites, inviteId, updatedInvite),
+        }));
+      }
+      applyWorkspaceSummary(result.updated_summary);
+      void triggerPostActionRefresh(orgId, {
+        includeDetails: result.refresh_hint?.include_details ?? true,
+      });
       showToast(
         "Đã gửi lại lời mời",
         "Lời mời đã được gửi lại cho thành viên và dashboard đã cập nhật.",
@@ -476,7 +532,7 @@ export default function DashboardPage() {
     const previousInvites = wsStatesRef.current[orgId]?.invites ?? [];
 
     updateWsState(orgId, (current) => ({
-      invites: current.invites.filter((invite) => invite.invite_id !== inviteId),
+      invites: removeInvite(current.invites, inviteId),
       inviteActionState: {
         ...current.inviteActionState,
         [inviteId]: "revoke",
@@ -484,17 +540,11 @@ export default function DashboardPage() {
     }));
 
     try {
-      await cancelInvite({ org_id: orgId, invite_id: inviteId });
-      setWorkspaces((prev) =>
-        prev.map((workspace) =>
-          workspace.org_id === orgId
-            ? {
-                ...workspace,
-                pending_invites: Math.max(0, (workspace.pending_invites ?? 0) - 1),
-              }
-            : workspace
-        )
-      );
+      const result = await cancelInvite({ org_id: orgId, invite_id: inviteId });
+      applyWorkspaceSummary(result.updated_summary);
+      void triggerPostActionRefresh(orgId, {
+        includeDetails: result.refresh_hint?.include_details ?? true,
+      });
       showToast(
         "Đã thu hồi lời mời",
         "Invite đã được revoke và dashboard đã cập nhật ngay lập tức.",
@@ -522,8 +572,18 @@ export default function DashboardPage() {
     if (!deletingWs) return;
     setDeleting(true);
     try {
-      await deleteWorkspace(deletingWs.org_id);
-      await loadWorkspaces({ silent: true });
+      const result = await deleteWorkspace(deletingWs.org_id);
+      setWorkspaces((prev) =>
+        prev.filter((workspace) => workspace.org_id !== (result.deleted_org_id ?? deletingWs.org_id))
+      );
+      setWsStates((prev) => {
+        const next = { ...prev };
+        delete next[deletingWs.org_id];
+        return next;
+      });
+      void triggerPostActionRefresh(undefined, {
+        includeDetails: result.refresh_hint?.include_details ?? false,
+      });
       setDeletingWs(null);
     } catch {
       showToast(
@@ -542,6 +602,10 @@ export default function DashboardPage() {
     0
   );
   const syncErrors = workspaces.filter((workspace) => workspace.status === "error").length;
+  const sortedWorkspaces = useMemo(
+    () => [...workspaces].sort(compareWorkspaceExpiry),
+    [workspaces]
+  );
 
   return (
     <main className="dashboard-layout">
@@ -594,7 +658,7 @@ export default function DashboardPage() {
       )}
 
       <div className="workspace-list">
-        {workspaces.map((ws) => {
+        {sortedWorkspaces.map((ws) => {
           const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
           const wsStatus =
             ws.status === "live"
@@ -702,7 +766,20 @@ export default function DashboardPage() {
                         <div className="section-panel invite-section-panel">
                           <InvitePanel
                             orgId={ws.org_id}
-                            onDone={() => loadMembers(ws.org_id)}
+                            onDone={({ invite, result }) => {
+                              if (invite) {
+                                updateWsState(ws.org_id, (current) => ({
+                                  invites: upsertInvite(current.invites, invite),
+                                  loadedMembers: true,
+                                }));
+                              }
+
+                              applyWorkspaceSummary(result.updated_summary);
+
+                              void triggerPostActionRefreshRef.current?.(ws.org_id, {
+                                includeDetails: result.refresh_hint?.include_details ?? !invite,
+                              });
+                            }}
                           />
                         </div>
 
@@ -743,10 +820,26 @@ export default function DashboardPage() {
       {showImport && (
         <ImportDialog
           onClose={() => setShowImport(false)}
-          onImported={() => {
+          onImported={({ importedOrgId, updatedRecords, refreshHint }) => {
             setShowImport(false);
+
+            updatedRecords.forEach((record) => {
+              mergeWorkspaceRecord(record);
+            });
+
+            const targetOrgId = importedOrgId ?? updatedRecords[0]?.org_id;
+            if (targetOrgId) {
+              updateWsState(targetOrgId, { syncing: true });
+            }
+
             invalidateApiCache();
-            void loadWorkspaces({ silent: true });
+            void loadWorkspacesRef.current?.({ silent: true });
+
+            if (targetOrgId) {
+              void triggerPostActionRefreshRef.current?.(targetOrgId, {
+                includeDetails: refreshHint?.include_details ?? true,
+              });
+            }
           }}
         />
       )}

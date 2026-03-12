@@ -71,3 +71,46 @@ export type Invite = {
   status: string;
   created_at: string;
 };
+
+export type RefreshHint = {
+  scope: "workspace_detail" | "workspace_list";
+  reason: string;
+  org_id?: string;
+  include_details: boolean;
+};
+
+export type MutationResult<TRecord = unknown, TSummary = Workspace> = {
+  ok: boolean;
+  action?: string;
+  updated_record?: TRecord;
+  updated_summary?: TSummary;
+  refresh_hint?: RefreshHint;
+  [key: string]: unknown;
+};
+
+export type InviteMutationResult = MutationResult<Invite> & {
+  invite_id?: string;
+  invite?: Invite;
+  role?: string;
+};
+
+export type MemberMutationResult = MutationResult<Member> & {
+  member_id?: number;
+  status?: string;
+};
+
+export type WorkspaceImportResult = MutationResult<Workspace[]> & {
+  imported: { id: number; org_id: string; name: string }[];
+  updated_records?: Workspace[];
+};
+
+export type WorkspaceSyncResult = MutationResult<never> & {
+  already_in_progress?: boolean;
+  members_synced: number;
+  invites_synced: number;
+  last_sync: string | null;
+};
+
+export type WorkspaceDeleteResult = MutationResult<never> & {
+  deleted_org_id: string;
+};
