@@ -238,21 +238,43 @@ class ChatGPTService:
         return result["data"]
 
     async def delete_invite(
-        self, access_token: str, account_id: str, email: str
+        self,
+        access_token: str,
+        account_id: str,
+        invite_id: str | None = None,
+        email: str | None = None,
     ) -> dict[str, Any]:
-        result = await self._request(
-            "DELETE",
-            f"/accounts/{account_id}/invites",
-            headers=self._build_headers(
-                access_token=access_token,
-                account_id=account_id,
-                extra={"Content-Type": "application/json"},
-            ),
-            json_data={"email_address": email},
+        headers = self._build_headers(
+            access_token=access_token,
+            account_id=account_id,
+            extra={"Content-Type": "application/json"},
         )
-        if not result["success"]:
-            raise RuntimeError(result.get("error", "failed to delete invite"))
-        return result["data"]
+        errors: list[str] = []
+
+        if invite_id:
+            result = await self._request(
+                "DELETE",
+                f"/accounts/{account_id}/invites/{invite_id}",
+                headers=headers,
+            )
+            if result["success"]:
+                return result["data"]
+            errors.append(result.get("error", "failed to delete invite by id"))
+
+        if email:
+            for payload in ({"email_addresses": [email]}, {"email_address": email}):
+                result = await self._request(
+                    "DELETE",
+                    f"/accounts/{account_id}/invites",
+                    headers=headers,
+                    json_data=payload,
+                )
+                if result["success"]:
+                    return result["data"]
+                errors.append(result.get("error", "failed to delete invite by email"))
+
+        detail = "; ".join(error for error in errors if error) or "failed to delete invite"
+        raise RuntimeError(detail)
 
     async def delete_member(
         self, access_token: str, account_id: str, user_id: str

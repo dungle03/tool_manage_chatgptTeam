@@ -1,16 +1,18 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from app.db import SessionLocal
 from app.main import app
 from app.models import Invite, Workspace
-from app.services.events import workspace_event_broker
+from app.routers.events import verify_sse_admin_token
+from app.services.events import format_sse, workspace_event_broker
 from app.services.workspace_sync import (
+    build_sync_in_progress_payload,
     list_stale_workspace_ids,
     pick_due_workspaces,
     schedule_followup_sync,
     sync_workspace_data,
 )
-
 
 
 def test_list_stale_workspace_ids_includes_null_last_sync():
@@ -189,10 +191,145 @@ def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     assert scheduled == [{"org_id": "org_001", "reason": "invite_created"}]
 
 
+def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(client, seed_data, monkeypatch):
+    payloads: list[dict] = []
+
+    def fake_in_progress(_org_id: str) -> bool:
+        return True
+
+    def fake_build_payload(workspace, session):
+        payload = build_sync_in_progress_payload(workspace, session)
+        payloads.append(payload)
+        return payload
+
+    monkeypatch.setattr("app.routers.workspaces.is_workspace_sync_in_progress", fake_in_progress)
+    monkeypatch.setattr("app.routers.workspaces.build_sync_in_progress_payload", fake_build_payload)
+
+    response = client.get("/api/workspaces/org_001/sync")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["already_in_progress"] is True
+    assert len(payloads) == 1
+
+
+def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote(seed_data, monkeypatch):
+    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
+        return {"access_token": "fresh-token", "session_token": _session_token}
+
+    async def fake_get_members(_self, _access_token, _account_id):
+        return []
+
+    async def fake_get_invites(_self, _access_token, _account_id):
+        return [
+            {
+                "id": "inv_seed_1",
+                "email": "pending@company.com",
+                "created_at": "2026-03-09T00:00:00Z",
+                "status": "pending",
+            }
+        ]
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+
+    session = SessionLocal()
+    try:
+        session.add(
+            Invite(
+                org_id="org_001",
+                email="new-pending@company.com",
+                invite_id="inv_local_new",
+                status="pending",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        payload = __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+
+        assert payload["ok"] is True
+        invites = session.query(Invite).filter(Invite.org_id == "org_001").all()
+        invite_ids = {invite.invite_id for invite in invites}
+        assert "inv_seed_1" in invite_ids
+        assert "inv_local_new" in invite_ids
+    finally:
+        session.close()
+
+
+def test_sync_workspace_data_removes_pending_invite_when_member_exists(seed_data, monkeypatch):
+    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
+        return {"access_token": "fresh-token", "session_token": _session_token}
+
+    async def fake_get_members(_self, _access_token, _account_id):
+        return [
+            {
+                "id": "user_joined_1",
+                "email": "anjolinal380@annnek.indevs.in",
+                "name": "Anjolina",
+                "role": "standard-user",
+                "created": "2026-03-12T00:00:00Z",
+            }
+        ]
+
+    async def fake_get_invites(_self, _access_token, _account_id):
+        return []
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+
+    session = SessionLocal()
+    try:
+        session.add(
+            Invite(
+                org_id="org_001",
+                email="anjolinal380@annnek.indevs.in",
+                invite_id="inv_joined_1",
+                status="pending",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        payload = __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+
+        assert payload["ok"] is True
+        invites = session.query(Invite).filter(Invite.org_id == "org_001").all()
+        invite_emails = {invite.email for invite in invites}
+        assert "anjolinal380@annnek.indevs.in" not in invite_emails
+    finally:
+        session.close()
+
+
 def test_workspace_events_stream_requires_auth_when_admin_token_set(client, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
     response = client.get("/api/events/workspaces")
     assert response.status_code == 401
+
+
+def test_verify_sse_admin_token_accepts_query_token(monkeypatch):
+    monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
+    request = SimpleNamespace(headers={})
+
+    token = __import__("asyncio").run(
+        verify_sse_admin_token(request=request, admin_token="secret-token")
+    )
+
+    assert token == "secret-token"
+
+
+def test_format_sse_encodes_heartbeat_event():
+    payload = workspace_event_broker.make_event("heartbeat")
+    encoded = format_sse(payload)
+
+    assert encoded.startswith("event: heartbeat\n")
+    assert '"type": "heartbeat"' in encoded
+    assert encoded.endswith("\n\n")
 
 
 def test_workspace_events_path_is_registered_in_openapi():

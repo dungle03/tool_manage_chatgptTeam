@@ -62,6 +62,96 @@ def _get_workspace_lock(org_id: str) -> asyncio.Lock:
     return lock
 
 
+def is_workspace_sync_in_progress(org_id: str) -> bool:
+    return _get_workspace_lock(org_id).locked()
+
+
+def build_refresh_hint(
+    *,
+    scope: str,
+    reason: str,
+    org_id: str | None = None,
+    include_details: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "scope": scope,
+        "reason": reason,
+        "include_details": include_details,
+    }
+    if org_id is not None:
+        payload["org_id"] = org_id
+    return payload
+
+
+def serialize_invite_row(invite: Invite) -> dict[str, Any]:
+    return {
+        "id": invite.id,
+        "org_id": invite.org_id,
+        "email": invite.email,
+        "invite_id": invite.invite_id,
+        "status": invite.status,
+        "created_at": serialize_datetime(invite.created_at),
+    }
+
+
+def serialize_member_row(member: Member) -> dict[str, Any]:
+    return {
+        "id": member.id,
+        "remote_id": member.remote_id,
+        "name": member.name,
+        "email": member.email,
+        "role": member.role,
+        "status": member.status,
+        "invite_date": serialize_datetime(member.invite_date),
+        "created_at": serialize_datetime(member.created_at),
+        "picture": member.picture,
+    }
+
+
+def build_action_response(
+    *,
+    action: str,
+    workspace: Workspace | None = None,
+    session: Session | None = None,
+    updated_record: dict[str, Any] | None = None,
+    updated_summary: dict[str, Any] | None = None,
+    refresh_hint: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"ok": True, "action": action}
+
+    if updated_summary is None and workspace is not None and session is not None:
+        updated_summary = workspace_to_dict(workspace, session)
+
+    if updated_record is not None:
+        payload["updated_record"] = updated_record
+    if updated_summary is not None:
+        payload["updated_summary"] = updated_summary
+    if refresh_hint is not None:
+        payload["refresh_hint"] = refresh_hint
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def build_sync_in_progress_payload(workspace: Workspace, session: Session) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "sync_workspace",
+        "already_in_progress": True,
+        "members_synced": 0,
+        "invites_synced": 0,
+        "last_sync": serialize_datetime(workspace.last_sync),
+        "updated_summary": workspace_to_dict(workspace, session),
+        "refresh_hint": build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="sync_already_in_progress",
+            include_details=True,
+        ),
+    }
+
+
 def parse_datetime(value: str | int | float | datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -183,6 +273,76 @@ def schedule_followup_sync(
 
     if publish_event:
         _publish_schedule_event(workspace, pending_invites)
+
+
+
+def _set_baseline_schedule(
+    workspace: Workspace,
+    *,
+    now: datetime,
+    pending_invites: int,
+) -> None:
+    workspace.hot_until = None
+    workspace.next_sync_at = now + timedelta(minutes=SYNC_BASELINE_MINUTES)
+    workspace.sync_reason = "baseline_refresh"
+    workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+
+
+
+def _schedule_next_sync_after_success(
+    session: Session,
+    workspace: Workspace,
+    *,
+    pending_invites: int,
+) -> None:
+    last_sync = coerce_utc(workspace.last_sync) or utc_now()
+
+    if pending_invites > 0:
+        schedule_followup_sync(
+            session,
+            workspace,
+            reason="pending_invite_watch",
+            delay_seconds=SYNC_PENDING_INVITE_SECONDS,
+            publish_event=False,
+        )
+        return
+
+    hot_until = coerce_utc(workspace.hot_until)
+    current_step_index = _step_index_from_reason(workspace.sync_reason)
+    has_active_hot_window = bool(hot_until and hot_until > last_sync)
+
+    if has_active_hot_window:
+        next_step_index = current_step_index + 1
+        if 0 <= next_step_index < len(SYNC_FOLLOWUP_STEPS):
+            schedule_followup_sync(
+                session,
+                workspace,
+                reason=f"followup:{next_step_index}",
+                delay_seconds=SYNC_FOLLOWUP_STEPS[next_step_index],
+                publish_event=False,
+            )
+            return
+
+    _set_baseline_schedule(
+        workspace,
+        now=last_sync,
+        pending_invites=pending_invites,
+    )
+
+
+
+def _schedule_retry_after_failure(
+    session: Session,
+    workspace: Workspace,
+) -> None:
+    retry_delay = SYNC_ERROR_RETRY_STEPS[0]
+    schedule_followup_sync(
+        session,
+        workspace,
+        reason="retry_after_error",
+        delay_seconds=retry_delay,
+        publish_event=False,
+    )
 
 
 
@@ -552,7 +712,25 @@ async def sync_workspace_data(
             )
 
             session.query(Member).where(Member.org_id == workspace.org_id).delete()
-            session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
+
+            existing_invites = (
+                session.execute(
+                    select(Invite).where(Invite.org_id == workspace.org_id)
+                )
+                .scalars()
+                .all()
+            )
+            invites_by_id = {
+                invite.invite_id: invite for invite in existing_invites if invite.invite_id
+            }
+            invites_by_email = {
+                invite.email.strip().lower(): invite
+                for invite in existing_invites
+                if invite.email
+            }
+            seen_invite_row_ids: set[int] = set()
+
+            synced_member_emails: set[str] = set()
 
             for item in remote_members:
                 created_raw = (
@@ -562,12 +740,16 @@ async def sync_workspace_data(
                 )
                 created = parse_datetime(created_raw)
                 role = normalize_member_role(item)
+                member_email = item.get("email") or ""
+                normalized_member_email = member_email.strip().lower()
+                if normalized_member_email:
+                    synced_member_emails.add(normalized_member_email)
 
                 session.add(
                     Member(
                         org_id=workspace.org_id,
                         remote_id=str(item.get("id") or "") or None,
-                        email=item.get("email") or "",
+                        email=member_email,
                         name=item.get("name") or "",
                         role=role,
                         status=item.get("status") or "active",
@@ -578,20 +760,46 @@ async def sync_workspace_data(
                 )
 
             for index, item in enumerate(remote_invites, start=1):
+                invite_id = str(
+                    item.get("id")
+                    or item.get("invite_id")
+                    or f"inv_{workspace.org_id}_{index}"
+                )
+                email = item.get("email") or item.get("email_address") or ""
+                normalized_email = email.strip().lower()
                 created_at = parse_datetime(item.get("created_at") or item.get("created"))
-                session.add(
-                    Invite(
+                existing_invite = invites_by_id.get(invite_id)
+                if existing_invite is None and normalized_email:
+                    existing_invite = invites_by_email.get(normalized_email)
+
+                if existing_invite is not None:
+                    existing_invite.email = email
+                    existing_invite.invite_id = invite_id
+                    existing_invite.status = item.get("status") or "pending"
+                    existing_invite.created_at = created_at or existing_invite.created_at
+                    seen_invite_row_ids.add(existing_invite.id)
+                else:
+                    invite = Invite(
                         org_id=workspace.org_id,
-                        email=item.get("email") or item.get("email_address") or "",
-                        invite_id=str(
-                            item.get("id")
-                            or item.get("invite_id")
-                            or f"inv_{workspace.org_id}_{index}"
-                        ),
+                        email=email,
+                        invite_id=invite_id,
                         status=item.get("status") or "pending",
                         created_at=created_at or datetime.now(timezone.utc),
                     )
-                )
+                    session.add(invite)
+                    session.flush()
+                    seen_invite_row_ids.add(invite.id)
+
+            for existing_invite in existing_invites:
+                normalized_existing_email = (existing_invite.email or "").strip().lower()
+                if normalized_existing_email and normalized_existing_email in synced_member_emails:
+                    session.delete(existing_invite)
+                    continue
+                if existing_invite.id in seen_invite_row_ids:
+                    continue
+                if existing_invite.status == "pending":
+                    continue
+                session.delete(existing_invite)
 
             workspace.member_count = len(remote_members)
             workspace.last_sync = utc_now()
@@ -599,46 +807,11 @@ async def sync_workspace_data(
             workspace.status = "live"
             workspace.sync_error = None
             pending_invites = _pending_invite_count(session, workspace.org_id)
-
-            if pending_invites > 0:
-                schedule_followup_sync(
-                    session,
-                    workspace,
-                    reason="pending_invite_watch",
-                    delay_seconds=SYNC_PENDING_INVITE_SECONDS,
-                    publish_event=False,
-                )
-            else:
-                hot_until = coerce_utc(workspace.hot_until)
-                current_step_index = _step_index_from_reason(workspace.sync_reason)
-                if hot_until and hot_until > workspace.last_sync:
-                    next_step_index = current_step_index + 1
-                    if 0 <= next_step_index < len(SYNC_FOLLOWUP_STEPS):
-                        schedule_followup_sync(
-                            session,
-                            workspace,
-                            reason=f"followup:{next_step_index}",
-                            delay_seconds=SYNC_FOLLOWUP_STEPS[next_step_index],
-                            publish_event=False,
-                        )
-                    else:
-                        workspace.hot_until = None
-                        workspace.next_sync_at = workspace.last_sync + timedelta(
-                            minutes=SYNC_BASELINE_MINUTES
-                        )
-                        workspace.sync_reason = "baseline_refresh"
-                        workspace.sync_priority = _priority_for_workspace(
-                            workspace, 0, workspace.last_sync
-                        )
-                else:
-                    workspace.hot_until = None
-                    workspace.next_sync_at = workspace.last_sync + timedelta(
-                        minutes=SYNC_BASELINE_MINUTES
-                    )
-                    workspace.sync_reason = "baseline_refresh"
-                    workspace.sync_priority = _priority_for_workspace(
-                        workspace, pending_invites, workspace.last_sync
-                    )
+            _schedule_next_sync_after_success(
+                session,
+                workspace,
+                pending_invites=pending_invites,
+            )
 
             session.commit()
 
@@ -666,14 +839,7 @@ async def sync_workspace_data(
             workspace.status = "error"
             workspace.sync_error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             workspace.sync_finished_at = utc_now()
-            retry_delay = SYNC_ERROR_RETRY_STEPS[0]
-            schedule_followup_sync(
-                session,
-                workspace,
-                reason="retry_after_error",
-                delay_seconds=retry_delay,
-                publish_event=False,
-            )
+            _schedule_retry_after_failure(session, workspace)
             session.commit()
             if publish_events:
                 workspace_event_broker.publish(
@@ -688,14 +854,7 @@ async def sync_workspace_data(
             workspace.status = "error"
             workspace.sync_error = str(exc)
             workspace.sync_finished_at = utc_now()
-            retry_delay = SYNC_ERROR_RETRY_STEPS[0]
-            schedule_followup_sync(
-                session,
-                workspace,
-                reason="retry_after_error",
-                delay_seconds=retry_delay,
-                publish_event=False,
-            )
+            _schedule_retry_after_failure(session, workspace)
             session.commit()
             if publish_events:
                 workspace_event_broker.publish(

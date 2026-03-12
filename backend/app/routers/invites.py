@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -8,9 +7,15 @@ from sqlalchemy.orm import Session
 from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite, Workspace
-from app.schemas import InviteActionRequest, InviteRequest
+from app.schemas import InviteActionRequest, InviteOut, InviteRequest
 from app.services.chatgpt import chatgpt_service
-from app.services.workspace_sync import resolve_access_token, schedule_followup_sync
+from app.services.workspace_sync import (
+    build_action_response,
+    build_refresh_hint,
+    resolve_access_token,
+    schedule_followup_sync,
+    serialize_invite_row,
+)
 
 router = APIRouter()
 
@@ -58,13 +63,27 @@ async def invite_member(
             account_id,
             payload.email,
         )
+
+        remote_invite_id = response.get("id")
+        if not remote_invite_id:
+            invites = await chatgpt_service.get_invites(access_token, account_id)
+            matched_invite = next(
+                (
+                    item
+                    for item in invites
+                    if str(item.get("email", "")).strip().lower() == payload.email.strip().lower()
+                    and str(item.get("status", "pending")).strip().lower() == "pending"
+                ),
+                None,
+            )
+            remote_invite_id = matched_invite.get("id") if matched_invite else None
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     invite = Invite(
         org_id=payload.org_id,
         email=payload.email,
-        invite_id=str(response.get("id") or f"inv_{uuid4().hex[:10]}"),
+        invite_id=str(remote_invite_id or payload.email.strip().lower()),
         status="pending",
         created_at=datetime.now(timezone.utc),
     )
@@ -75,7 +94,25 @@ async def invite_member(
         reason="invite_created",
     )
     session.commit()
-    return {"ok": True, "invite_id": invite.invite_id, "role": payload.role}
+    session.refresh(invite)
+    invite_payload = serialize_invite_row(invite)
+    return build_action_response(
+        action="invite_create",
+        workspace=workspace,
+        session=session,
+        updated_record=invite_payload,
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="invite_created",
+            include_details=True,
+        ),
+        extra={
+            "invite_id": invite.invite_id,
+            "role": payload.role,
+            "invite": invite_payload,
+        },
+    )
 
 
 @router.post("/api/resend-invite")
@@ -114,7 +151,19 @@ async def resend_invite(
         reason="invite_resend",
     )
     session.commit()
-    return {"ok": True, "status": row.status, "invite_id": row.invite_id}
+    return build_action_response(
+        action="invite_resend",
+        workspace=workspace,
+        session=session,
+        updated_record=serialize_invite_row(row),
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="invite_resend",
+            include_details=True,
+        ),
+        extra={"status": row.status, "invite_id": row.invite_id},
+    )
 
 
 @router.delete("/api/cancel-invite")
@@ -142,7 +191,12 @@ async def cancel_invite(
     account_id = workspace.account_id or workspace.org_id
 
     try:
-        await chatgpt_service.delete_invite(access_token, account_id, row.email)
+        await chatgpt_service.delete_invite(
+            access_token,
+            account_id,
+            invite_id=row.invite_id,
+            email=row.email,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -153,4 +207,16 @@ async def cancel_invite(
         reason="invite_cancelled",
     )
     session.commit()
-    return {"ok": True, "status": row.status, "invite_id": row.invite_id}
+    return build_action_response(
+        action="invite_cancel",
+        workspace=workspace,
+        session=session,
+        updated_record=serialize_invite_row(row),
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="invite_cancelled",
+            include_details=True,
+        ),
+        extra={"status": row.status, "invite_id": row.invite_id},
+    )

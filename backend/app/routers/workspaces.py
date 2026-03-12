@@ -8,11 +8,16 @@ from app.models import Invite, Member, Workspace
 from app.schemas import WorkspaceImportRequest
 from app.services.chatgpt import chatgpt_service
 from app.services.workspace_sync import (
+    build_action_response,
+    build_refresh_hint,
+    build_sync_in_progress_payload,
     build_workspace_list_payload,
+    is_workspace_sync_in_progress,
     parse_datetime,
     schedule_followup_sync,
     serialize_datetime,
     sync_workspace_data,
+    workspace_to_dict,
 )
 
 router = APIRouter()
@@ -142,7 +147,23 @@ async def import_team(
             )
 
     session.commit()
-    return {"ok": True, "imported": imported}
+    refreshed_workspaces = (
+        session.execute(
+            select(Workspace).where(Workspace.org_id.in_(imported_org_ids)).order_by(Workspace.org_id)
+        )
+        .scalars()
+        .all()
+    )
+    imported_payload = build_workspace_list_payload(refreshed_workspaces, session)
+    return build_action_response(
+        action="workspace_import",
+        refresh_hint=build_refresh_hint(
+            scope="workspace_list",
+            reason="workspace_imported",
+            include_details=False,
+        ),
+        extra={"imported": imported, "updated_records": imported_payload},
+    )
 
 
 @router.get("/api/workspaces/{id}/members")
@@ -180,6 +201,16 @@ async def sync_workspace(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
+    if is_workspace_sync_in_progress(workspace.org_id):
+        schedule_followup_sync(
+            session,
+            workspace,
+            reason="manual_sync",
+            delay_seconds=0,
+        )
+        session.commit()
+        return build_sync_in_progress_payload(workspace, session)
+
     schedule_followup_sync(
         session,
         workspace,
@@ -207,9 +238,20 @@ def delete_workspace(
     if not workspace:
         raise HTTPException(status_code=404, detail="workspace not found")
 
+    deleted_summary = workspace_to_dict(workspace, session)
     session.query(Member).where(Member.org_id == workspace.org_id).delete()
     session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
     session.delete(workspace)
     session.commit()
 
-    return {"ok": True, "deleted_org_id": id}
+    return build_action_response(
+        action="workspace_delete",
+        updated_summary=deleted_summary,
+        refresh_hint=build_refresh_hint(
+            scope="workspace_list",
+            org_id=id,
+            reason="workspace_deleted",
+            include_details=False,
+        ),
+        extra={"deleted_org_id": id},
+    )

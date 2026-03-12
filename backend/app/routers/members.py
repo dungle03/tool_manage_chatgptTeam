@@ -7,7 +7,13 @@ from app.db import get_session
 from app.models import Member, Workspace
 from app.schemas import KickMemberRequest
 from app.services.chatgpt import chatgpt_service
-from app.services.workspace_sync import resolve_access_token, schedule_followup_sync
+from app.services.workspace_sync import (
+    build_action_response,
+    build_refresh_hint,
+    resolve_access_token,
+    schedule_followup_sync,
+    serialize_member_row,
+)
 
 router = APIRouter()
 
@@ -69,4 +75,16 @@ async def delete_member(
         reason="member_kicked",
     )
     session.commit()
-    return {"ok": True, "member_id": row.id, "status": row.status}
+    return build_action_response(
+        action="member_kick",
+        workspace=workspace,
+        session=session,
+        updated_record=serialize_member_row(row),
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="member_kicked",
+            include_details=True,
+        ),
+        extra={"member_id": row.id, "status": row.status},
+    )
