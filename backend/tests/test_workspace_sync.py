@@ -36,7 +36,7 @@ def test_sync_workspace_fetches_remote_and_updates_cache(client, seed_data, monk
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
 
-    response = client.get("/api/workspaces/org_001/sync")
+    response = client.post("/api/workspaces/org_001/sync")
 
     assert response.status_code == 200
     data = response.json()
@@ -72,7 +72,7 @@ def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(client, seed_
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
 
-    sync_response = client.get("/api/workspaces/org_001/sync")
+    sync_response = client.post("/api/workspaces/org_001/sync")
     assert sync_response.status_code == 200
 
     members_response = client.get("/api/workspaces/org_001/members")
@@ -144,7 +144,7 @@ def test_sync_workspace_uses_expected_date_field_priority(
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
 
-    sync_response = client.get("/api/workspaces/org_001/sync")
+    sync_response = client.post("/api/workspaces/org_001/sync")
     assert sync_response.status_code == 200
 
     members_response = client.get("/api/workspaces/org_001/members")

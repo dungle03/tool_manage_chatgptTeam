@@ -59,18 +59,30 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
       setRefreshHint(res.refresh_hint);
       setStep("syncing");
 
-      const syncFailures: string[] = [];
-      for (const ws of importedList) {
-        try {
-          await syncWorkspace(ws.org_id);
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : "Không rõ nguyên nhân";
-          syncFailures.push(`${ws.name}: ${detail}`);
-        }
-      }
+      const scheduledWarnings = (res.schedule_warnings ?? []).map((warning) => {
+        const matchedWorkspace = importedList.find((ws) => ws.org_id === warning.org_id);
+        return `${matchedWorkspace?.name ?? warning.org_id}: ${warning.message}`;
+      });
 
-      setSyncWarnings(syncFailures);
-      if (syncFailures.length > 0) {
+      const syncResults = await Promise.allSettled(
+        importedList.map(async (ws) => {
+          await syncWorkspace(ws.org_id);
+          return ws;
+        })
+      );
+
+      const syncFailures = syncResults.flatMap((result, index) => {
+        if (result.status === "fulfilled") {
+          return [];
+        }
+
+        const detail = result.reason instanceof Error ? result.reason.message : "Không rõ nguyên nhân";
+        return [`${importedList[index]?.name ?? importedList[index]?.org_id ?? `workspace-${index + 1}`}: ${detail}`];
+      });
+
+      const nextWarnings = [...scheduledWarnings, ...syncFailures];
+      setSyncWarnings(nextWarnings);
+      if (nextWarnings.length > 0) {
         setError(
           "Import đã xong nhưng một số workspace chưa sync được ngay. Anh vẫn có thể vào dashboard và sync lại sau."
         );

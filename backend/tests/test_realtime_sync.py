@@ -131,6 +131,32 @@ def test_schedule_followup_sync_marks_workspace_hot(seed_data):
         session.close()
 
 
+def test_schedule_followup_sync_does_not_force_flush(seed_data, monkeypatch):
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        original_flush = session.flush
+        flush_calls: list[object] = []
+
+        def tracking_flush(*args, **kwargs):
+            flush_calls.append((args, kwargs))
+            return original_flush(*args, **kwargs)
+
+        monkeypatch.setattr(session, "flush", tracking_flush)
+
+        schedule_followup_sync(session, workspace, reason="invite_created", delay_seconds=5)
+        assert flush_calls == []
+
+        monkeypatch.setattr(session, "flush", original_flush)
+        session.commit()
+        session.refresh(workspace)
+
+        assert workspace.next_sync_at is not None
+        assert workspace.sync_reason == "invite_created"
+    finally:
+        session.close()
+
+
 def test_pick_due_workspaces_prioritizes_hot_and_pending(seed_data):
     session = SessionLocal()
     try:
@@ -205,7 +231,7 @@ def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(client, se
     monkeypatch.setattr("app.routers.workspaces.is_workspace_sync_in_progress", fake_in_progress)
     monkeypatch.setattr("app.routers.workspaces.build_sync_in_progress_payload", fake_build_payload)
 
-    response = client.get("/api/workspaces/org_001/sync")
+    response = client.post("/api/workspaces/org_001/sync")
 
     assert response.status_code == 200
     data = response.json()
@@ -323,6 +349,25 @@ def test_verify_sse_admin_token_accepts_query_token(monkeypatch):
     assert token == "secret-token"
 
 
+def test_workspace_list_falls_back_to_user_role_for_invalid_access_token(client, seed_data):
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        workspace.access_token = "not-a-valid-jwt"
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get("/api/workspaces")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["org_id"] == "org_001"
+    assert data[0]["current_user_role"] == "user"
+    assert data[0]["can_manage_members"] is False
+
+
 def test_format_sse_encodes_heartbeat_event():
     payload = workspace_event_broker.make_event("heartbeat")
     encoded = format_sse(payload)
@@ -330,6 +375,106 @@ def test_format_sse_encodes_heartbeat_event():
     assert encoded.startswith("event: heartbeat\n")
     assert '"type": "heartbeat"' in encoded
     assert encoded.endswith("\n\n")
+
+
+def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
+    calls = {"count": 0}
+    log_messages: list[str] = []
+
+    async def fake_run_sync_cycle(_session_factory):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("boom once")
+
+    class _StopEvent:
+        def __init__(self):
+            self.wait_calls = 0
+
+        def is_set(self):
+            return self.wait_calls >= 2
+
+        async def wait(self):
+            self.wait_calls += 1
+            return None
+
+    async def fake_wait_for(awaitable, timeout):
+        stop_event = awaitable.cr_frame.f_locals["self"]
+        await awaitable
+        if stop_event.wait_calls == 1:
+            raise TimeoutError
+        return True
+
+    def fake_log_exception(message, *args):
+        if args:
+            message = message % args
+        log_messages.append(message)
+
+    monkeypatch.setattr("app.services.workspace_sync.run_sync_cycle", fake_run_sync_cycle)
+    monkeypatch.setattr("app.services.workspace_sync.asyncio.wait_for", fake_wait_for)
+    monkeypatch.setattr("app.services.workspace_sync.logger.exception", fake_log_exception)
+
+    __import__("asyncio").run(
+        __import__("app.services.workspace_sync", fromlist=["_background_sync_loop"])._background_sync_loop(
+            session_factory=lambda: None,
+            stop_event=_StopEvent(),
+        )
+    )
+
+    assert calls["count"] == 2
+    assert log_messages == [
+        "Background sync loop error while running sync cycle: boom once"
+    ]
+
+
+def test_sync_workspace_data_persists_error_state_after_commit_failure(seed_data, monkeypatch):
+    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
+        return {"access_token": "fresh-token", "session_token": _session_token}
+
+    async def fake_get_members(_self, _access_token, _account_id):
+        return []
+
+    async def fake_get_invites(_self, _access_token, _account_id):
+        return []
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+
+    session = SessionLocal()
+    original_commit = session.commit
+    commit_calls = {"count": 0}
+
+    def flaky_commit():
+        commit_calls["count"] += 1
+        if commit_calls["count"] == 2:
+            raise RuntimeError("commit exploded")
+        return original_commit()
+
+    session.commit = flaky_commit
+
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        raised_exception = None
+
+        try:
+            __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+        except Exception as exc:
+            raised_exception = exc
+
+        from fastapi import HTTPException
+
+        assert isinstance(raised_exception, HTTPException)
+        assert raised_exception.status_code == 502
+        assert raised_exception.detail == "workspace sync failed: commit exploded"
+
+        session.expire_all()
+        persisted = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        assert persisted.status == "error"
+        assert persisted.sync_error == "commit exploded"
+        assert persisted.sync_finished_at is not None
+        assert persisted.next_sync_at is not None
+    finally:
+        session.close()
 
 
 def test_workspace_events_path_is_registered_in_openapi():

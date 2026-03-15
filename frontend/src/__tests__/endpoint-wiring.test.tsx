@@ -20,5 +20,8 @@ describe("endpoint wiring", () => {
     expect(calledUrls).toContain("/api/resend-invite");
     expect(calledUrls).toContain("/api/cancel-invite");
     expect(calledUrls).toContain("/api/workspaces/org_001/sync");
+
+    const syncCall = mockFetch.mock.calls.find((x: any[]) => x[0] === "/api/workspaces/org_001/sync");
+    expect(syncCall?.[1]?.method).toBe("POST");
   });
 });
