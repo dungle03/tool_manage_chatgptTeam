@@ -59,6 +59,45 @@ const DEFAULT_WS_STATE: WorkspaceState = {
 
 const EVENT_REFRESH_WINDOW_MS = 450;
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return "Lỗi không xác định";
+}
+
+function getActionErrorCopy(action: "sync" | "kick" | "resend" | "revoke" | "delete_workspace", error: unknown): string {
+  const detail = getErrorMessage(error);
+
+  if (detail.includes("HTTP 404")) {
+    return "Dữ liệu liên quan không còn tồn tại hoặc dashboard đang hiển thị bản cũ. Hãy tải lại danh sách.";
+  }
+
+  if (detail.includes("HTTP 409") || detail.includes("cannot remove owner")) {
+    return "Thao tác bị chặn vì dữ liệu hiện tại không cho phép thực hiện bước này.";
+  }
+
+  if (detail.includes("HTTP 401") || detail.includes("HTTP 403")) {
+    return "Token hiện tại không hợp lệ hoặc đã hết hạn. Hãy kiểm tra lại phiên làm việc rồi thử lại.";
+  }
+
+  if (detail.includes("HTTP 500") || detail.includes("HTTP 502")) {
+    return `Backend hoặc dịch vụ đồng bộ đang lỗi: ${detail}`;
+  }
+
+  const fallbackByAction = {
+    sync: "Workspace chưa thể đồng bộ ở thời điểm này.",
+    kick: "Chưa thể xóa thành viên ở thời điểm này.",
+    resend: "Chưa thể gửi lại lời mời ở thời điểm này.",
+    revoke: "Chưa thể thu hồi lời mời ở thời điểm này.",
+    delete_workspace: "Chưa thể xóa workspace ở thời điểm này.",
+  } satisfies Record<typeof action, string>;
+
+  return detail === "Lỗi không xác định"
+    ? fallbackByAction[action]
+    : `${fallbackByAction[action]} Chi tiết: ${detail}`;
+}
+
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [wsStates, setWsStates] = useState<Record<string, WorkspaceState>>({});
@@ -139,10 +178,10 @@ export default function DashboardPage() {
       }
       const data = await getWorkspaces();
       setWorkspaces(data);
-    } catch {
+    } catch (error) {
       showToast(
         "Không thể tải workspace",
-        "Hãy kiểm tra backend đang chạy và thử tải lại dashboard.",
+        getActionErrorCopy("sync", error),
         "error"
       );
     } finally {
@@ -153,19 +192,40 @@ export default function DashboardPage() {
   }, []);
 
   const refreshWorkspaceDetails = useCallback(async (orgId: string) => {
-    try {
-      const [members, invites] = await Promise.all([
-        getWorkspaceMembers(orgId),
-        listInvites(orgId).catch(() => [] as Invite[]),
-      ]);
-      updateWsState(orgId, {
-        members,
-        invites,
-        loadedMembers: true,
-        syncing: false,
-      });
-    } catch {
-      updateWsState(orgId, { syncing: false });
+    const [membersResult, invitesResult] = await Promise.allSettled([
+      getWorkspaceMembers(orgId),
+      listInvites(orgId),
+    ]);
+
+    const nextPatch: Partial<WorkspaceState> = {
+      syncing: false,
+    };
+
+    if (membersResult.status === "fulfilled") {
+      nextPatch.members = membersResult.value;
+      nextPatch.loadedMembers = true;
+    }
+
+    if (invitesResult.status === "fulfilled") {
+      nextPatch.invites = invitesResult.value;
+    }
+
+    updateWsState(orgId, nextPatch);
+
+    if (membersResult.status === "rejected") {
+      showToast(
+        "Không thể làm mới danh sách thành viên",
+        `Workspace ${orgId}: ${getActionErrorCopy("sync", membersResult.reason)}`,
+        "error"
+      );
+    }
+
+    if (invitesResult.status === "rejected") {
+      showToast(
+        "Không thể làm mới danh sách invite",
+        `Workspace ${orgId}: ${getActionErrorCopy("sync", invitesResult.reason)}`,
+        "error"
+      );
     }
   }, [updateWsState]);
 
@@ -349,8 +409,10 @@ export default function DashboardPage() {
         const payload = parseWorkspaceEvent(message.data);
         reconnectAttemptsRef.current = 0;
         handleWorkspaceEvent(payload);
-      } catch {
-        // ignore malformed events
+      } catch (error) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("Ignoring malformed workspace event", error, message.data);
+        }
       }
     };
 
@@ -413,23 +475,47 @@ export default function DashboardPage() {
 
     const request = (async () => {
       updateWsState(orgId, { syncing: true });
-      try {
-        const [members, invites] = await Promise.all([
-          getWorkspaceMembers(orgId),
-          listInvites(orgId).catch(() => [] as Invite[]),
-        ]);
-        updateWsState(orgId, { members, invites, loadedMembers: true });
-      } catch {
+      const [membersResult, invitesResult] = await Promise.allSettled([
+        getWorkspaceMembers(orgId),
+        listInvites(orgId),
+      ]);
+
+      const nextPatch: Partial<WorkspaceState> = {
+        syncing: false,
+      };
+
+      if (membersResult.status === "fulfilled") {
+        nextPatch.members = membersResult.value;
+        nextPatch.loadedMembers = true;
+      }
+
+      if (invitesResult.status === "fulfilled") {
+        nextPatch.invites = invitesResult.value;
+      }
+
+      updateWsState(orgId, nextPatch);
+
+      if (membersResult.status === "rejected") {
         showToast(
-          "Không thể tải dữ liệu workspace",
-          `Workspace ${orgId} hiện chưa đọc được members hoặc invites.`,
+          "Không thể tải danh sách thành viên",
+          `Workspace ${orgId}: ${getActionErrorCopy("sync", membersResult.reason)}`,
           "error"
         );
-      } finally {
-        updateWsState(orgId, { syncing: false });
-        inflightMemberLoads.current.delete(orgId);
       }
-    })();
+
+      if (invitesResult.status === "rejected") {
+        showToast(
+          "Không thể tải danh sách invite",
+          `Workspace ${orgId}: ${getActionErrorCopy("sync", invitesResult.reason)}`,
+          "error"
+        );
+      }
+
+      inflightMemberLoads.current.delete(orgId);
+    })().finally(() => {
+      updateWsState(orgId, { syncing: false });
+      inflightMemberLoads.current.delete(orgId);
+    });
 
     inflightMemberLoads.current.set(orgId, request);
     return request;
@@ -452,10 +538,10 @@ export default function DashboardPage() {
         `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`,
         "success"
       );
-    } catch {
+    } catch (error) {
       showToast(
         "Sync thất bại",
-        `Workspace ${orgId} chưa thể đồng bộ. Token có thể đã hết hạn.`,
+        getActionErrorCopy("sync", error),
         "error"
       );
       updateWsState(orgId, { syncing: false });
@@ -482,10 +568,10 @@ export default function DashboardPage() {
         "Thành viên đã được gỡ khỏi workspace thành công.",
         "success"
       );
-    } catch {
+    } catch (error) {
       showToast(
         "Không thể xóa thành viên",
-        "Hãy thử lại sau hoặc kiểm tra quyền owner/admin hiện tại.",
+        getActionErrorCopy("kick", error),
         "error"
       );
     } finally {
@@ -520,10 +606,10 @@ export default function DashboardPage() {
         "Lời mời đã được gửi lại cho thành viên và dashboard đã cập nhật.",
         "success"
       );
-    } catch {
+    } catch (error) {
       showToast(
         "Gửi lại thất bại",
-        "Không thể resend lời mời ở thời điểm này.",
+        getActionErrorCopy("resend", error),
         "error"
       );
     } finally {
@@ -557,13 +643,13 @@ export default function DashboardPage() {
         "Invite đã được revoke và dashboard đã cập nhật ngay lập tức.",
         "success"
       );
-    } catch {
+    } catch (error) {
       updateWsState(orgId, {
         invites: previousInvites,
       });
       showToast(
         "Thu hồi thất bại",
-        "Không thể revoke lời mời này. Hãy thử lại sau.",
+        getActionErrorCopy("revoke", error),
         "error"
       );
     } finally {
@@ -592,10 +678,10 @@ export default function DashboardPage() {
         includeDetails: result.refresh_hint?.include_details ?? false,
       });
       setDeletingWs(null);
-    } catch {
+    } catch (error) {
       showToast(
         "Không thể xóa workspace",
-        `Workspace ${deletingWs.name} chưa thể xóa ở thời điểm này.`,
+        getActionErrorCopy("delete_workspace", error),
         "error"
       );
     } finally {
@@ -608,7 +694,7 @@ export default function DashboardPage() {
     (sum, workspace) => sum + (workspace.pending_invites ?? 0),
     0
   );
-  const totalCapacity = workspaces.length * 7;
+  const totalCapacity = workspaces.reduce((sum, workspace) => sum + (workspace.member_limit ?? 0), 0);
   const availableSlots = Math.max(totalCapacity - totalMembers, 0);
   // const syncErrors = workspaces.filter((workspace) => workspace.status === "error").length;
   const sortedWorkspaces = useMemo(

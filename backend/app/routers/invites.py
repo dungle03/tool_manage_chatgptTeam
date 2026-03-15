@@ -78,7 +78,10 @@ async def invite_member(
             )
             remote_invite_id = matched_invite.get("id") if matched_invite else None
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to create invite upstream: {exc}",
+        ) from exc
 
     invite = Invite(
         org_id=payload.org_id,
@@ -88,14 +91,14 @@ async def invite_member(
         created_at=datetime.now(timezone.utc),
     )
     session.add(invite)
+    session.flush()
+    invite_payload = serialize_invite_row(invite)
     schedule_followup_sync(
         session,
         workspace,
         reason="invite_created",
     )
     session.commit()
-    session.refresh(invite)
-    invite_payload = serialize_invite_row(invite)
     return build_action_response(
         action="invite_create",
         workspace=workspace,
@@ -108,7 +111,7 @@ async def invite_member(
             include_details=True,
         ),
         extra={
-            "invite_id": invite.invite_id,
+            "invite_id": invite_payload["invite_id"],
             "role": payload.role,
             "invite": invite_payload,
         },
@@ -138,13 +141,18 @@ async def resend_invite(
 
     access_token = await resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
+    invite_id = row.invite_id
+    updated_record = serialize_invite_row(row)
+    updated_record["status"] = "pending"
 
     try:
         await chatgpt_service.send_invite(access_token, account_id, row.email)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to resend invite upstream: {exc}",
+        ) from exc
 
-    row.status = "pending"
     schedule_followup_sync(
         session,
         workspace,
@@ -155,14 +163,14 @@ async def resend_invite(
         action="invite_resend",
         workspace=workspace,
         session=session,
-        updated_record=serialize_invite_row(row),
+        updated_record=updated_record,
         refresh_hint=build_refresh_hint(
             scope="workspace_detail",
             org_id=workspace.org_id,
             reason="invite_resend",
             include_details=True,
         ),
-        extra={"status": row.status, "invite_id": row.invite_id},
+        extra={"status": "pending", "invite_id": invite_id},
     )
 
 
@@ -189,6 +197,9 @@ async def cancel_invite(
 
     access_token = await resolve_access_token(workspace)
     account_id = workspace.account_id or workspace.org_id
+    invite_id = row.invite_id
+    updated_record = serialize_invite_row(row)
+    updated_record["status"] = "cancelled"
 
     try:
         await chatgpt_service.delete_invite(
@@ -198,9 +209,11 @@ async def cancel_invite(
             email=row.email,
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to cancel invite upstream: {exc}",
+        ) from exc
 
-    row.status = "cancelled"
     schedule_followup_sync(
         session,
         workspace,
@@ -211,12 +224,12 @@ async def cancel_invite(
         action="invite_cancel",
         workspace=workspace,
         session=session,
-        updated_record=serialize_invite_row(row),
+        updated_record=updated_record,
         refresh_hint=build_refresh_hint(
             scope="workspace_detail",
             org_id=workspace.org_id,
             reason="invite_cancelled",
             include_details=True,
         ),
-        extra={"status": row.status, "invite_id": row.invite_id},
+        extra={"status": "cancelled", "invite_id": invite_id},
     )

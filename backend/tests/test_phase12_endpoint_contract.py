@@ -24,7 +24,7 @@ def test_get_workspaces_exposes_phase2_fields(client, seed_data):
 
 
 def test_workspace_sync_endpoint_has_phase2_shape(client, seed_data):
-    response = client.get("/api/workspaces/org_001/sync")
+    response = client.post("/api/workspaces/org_001/sync")
     assert response.status_code == 502
     body = response.json()
     assert body["detail"]
@@ -62,3 +62,43 @@ def test_workspace_import_returns_richer_contract(client, monkeypatch):
     assert body["updated_records"][0]["org_id"] == "org_import_1"
     assert body["updated_records"][0]["name"] == "Imported Team"
     assert body["updated_records"][0]["status"] == "live"
+    assert body["schedule_warnings"] == []
+
+
+def test_workspace_import_returns_partial_success_when_followup_schedule_fails(client, monkeypatch):
+    async def fake_get_account_info(_self, _access_token):
+        return [
+            {
+                "account_id": "org_import_warn_1",
+                "name": "Imported Warn Team",
+                "member_limit": 8,
+                "expires_at": None,
+            }
+        ]
+
+    def fake_schedule_followup_sync(_session, workspace, *, reason, delay_seconds=None, hot_window_seconds=None, publish_event=True):
+        if workspace.org_id == "org_import_warn_1":
+            raise RuntimeError("schedule phase failed")
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info)
+    monkeypatch.setattr("app.routers.workspaces.schedule_followup_sync", fake_schedule_followup_sync)
+
+    response = client.post(
+        "/api/teams/import",
+        json={"access_token": "token-456"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["imported"] == [
+        {"id": 1, "org_id": "org_import_warn_1", "name": "Imported Warn Team"}
+    ]
+    assert len(body["updated_records"]) == 1
+    assert body["updated_records"][0]["org_id"] == "org_import_warn_1"
+    assert body["schedule_warnings"] == [
+        {
+            "org_id": "org_import_warn_1",
+            "message": "failed to schedule follow-up sync: schedule phase failed",
+        }
+    ]

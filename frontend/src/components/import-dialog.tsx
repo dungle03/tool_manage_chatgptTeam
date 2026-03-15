@@ -27,6 +27,7 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
   const [imported, setImported] = useState<{ org_id: string; name: string }[]>([]);
   const [updatedRecords, setUpdatedRecords] = useState<Workspace[]>([]);
   const [refreshHint, setRefreshHint] = useState<RefreshHint | undefined>(undefined);
+  const [syncWarnings, setSyncWarnings] = useState<string[]>([]);
 
   async function handleImport() {
     const payload =
@@ -41,6 +42,7 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
 
     setLoading(true);
     setError(null);
+    setSyncWarnings([]);
 
     try {
       const res = await importTeam(payload);
@@ -57,14 +59,22 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
       setRefreshHint(res.refresh_hint);
       setStep("syncing");
 
+      const syncFailures: string[] = [];
       for (const ws of importedList) {
         try {
           await syncWorkspace(ws.org_id);
-        } catch {
-          // sync errors are non-fatal
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "Không rõ nguyên nhân";
+          syncFailures.push(`${ws.name}: ${detail}`);
         }
       }
 
+      setSyncWarnings(syncFailures);
+      if (syncFailures.length > 0) {
+        setError(
+          "Import đã xong nhưng một số workspace chưa sync được ngay. Anh vẫn có thể vào dashboard và sync lại sau."
+        );
+      }
       setStep("done");
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : "Có lỗi xảy ra.";
@@ -197,6 +207,16 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
           <div className="import-status">
             <div style={{ fontSize: 48 }}>🎉</div>
             <h4>Import thành công!</h4>
+            {syncWarnings.length > 0 && (
+              <div className="import-error" style={{ marginBottom: 16 }}>
+                ⚠️ Một số workspace chưa sync xong ngay:
+                <ul className="import-workspace-list">
+                  {syncWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <ul className="import-workspace-list">
               {imported.map((ws) => (
                 <li key={ws.org_id} style={{ color: "var(--success)" }}>✅ {ws.name}</li>

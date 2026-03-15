@@ -3,6 +3,7 @@ import random
 from typing import Any
 
 import jwt
+from jwt import PyJWTError
 from curl_cffi.requests import AsyncSession
 
 
@@ -21,7 +22,7 @@ class ChatGPTService:
             for session in self._sessions.values():
                 try:
                     await session.close()
-                except Exception:
+                except RuntimeError:
                     pass
             self._sessions.clear()
         self._loop_id = loop_id
@@ -63,6 +64,9 @@ class ChatGPTService:
         cookies: dict[str, str] | None = None,
         use_base_url: bool = True,
     ) -> dict[str, Any]:
+        if method not in {"GET", "POST", "DELETE"}:
+            raise ValueError(f"Unsupported method: {method}")
+
         session = await self._get_session()
         url = f"{self.BASE_URL}{path}" if use_base_url else path
         request_headers = headers or {}
@@ -80,20 +84,18 @@ class ChatGPTService:
                         json=json_data,
                         cookies=cookies,
                     )
-                elif method == "DELETE":
+                else:
                     response = await session.delete(
                         url,
                         headers=request_headers,
                         json=json_data,
                         cookies=cookies,
                     )
-                else:
-                    raise ValueError(f"Unsupported method: {method}")
 
                 if 200 <= response.status_code < 300:
                     try:
                         return {"success": True, "data": response.json()}
-                    except Exception:
+                    except ValueError:
                         return {"success": True, "data": {}}
 
                 if response.status_code >= 500 and attempt < self.MAX_RETRIES - 1:
@@ -111,7 +113,11 @@ class ChatGPTService:
                     delay = self.RETRY_DELAYS[attempt] + random.uniform(0.5, 1.5)
                     await asyncio.sleep(delay)
                     continue
-                return {"success": False, "error": str(exc), "status_code": 0}
+                return {
+                    "success": False,
+                    "error": f"{method} {url} request failed: {exc}",
+                    "status_code": 0,
+                }
 
         return {"success": False, "error": "unknown error", "status_code": 0}
 

@@ -102,6 +102,7 @@ export type MemberMutationResult = MutationResult<Member> & {
 export type WorkspaceImportResult = MutationResult<Workspace[]> & {
   imported: { id: number; org_id: string; name: string }[];
   updated_records?: Workspace[];
+  schedule_warnings?: { org_id: string; message: string }[];
 };
 
 export type WorkspaceSyncResult = MutationResult<never> & {

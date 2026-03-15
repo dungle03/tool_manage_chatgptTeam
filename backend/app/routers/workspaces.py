@@ -59,14 +59,20 @@ async def import_team(
                 payload.org_id,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=502,
+                detail=f"failed to refresh access token: {exc}",
+            ) from exc
         access_token = refreshed["access_token"]
         session_token = refreshed.get("session_token") or session_token
 
     try:
         accounts = await chatgpt_service.get_account_info(access_token)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to load team accounts: {exc}",
+        ) from exc
 
     if not accounts and payload.org_id and payload.name:
         accounts = [
@@ -84,7 +90,7 @@ async def import_team(
             detail="no team account found for provided token",
         )
 
-    imported = []
+    imported_workspaces: list[Workspace] = []
     for info in accounts:
         account_id = str(info.get("account_id") or "")
         if not account_id:
@@ -121,32 +127,48 @@ async def import_team(
                 last_sync=None,
             )
             session.add(workspace)
-            session.flush()
 
-        imported.append(
-            {
-                "id": workspace.id,
-                "org_id": workspace.org_id,
-                "name": workspace.name,
-            }
-        )
+        imported_workspaces.append(workspace)
 
-    if not imported:
+    if not imported_workspaces:
         raise HTTPException(status_code=502, detail="unable to import team workspace")
 
+    session.flush()
+    imported = [
+        {
+            "id": workspace.id,
+            "org_id": workspace.org_id,
+            "name": workspace.name,
+        }
+        for workspace in imported_workspaces
+    ]
     imported_org_ids = [item["org_id"] for item in imported]
+    session.commit()
+
+    schedule_warnings: list[dict[str, str]] = []
     for org_id in imported_org_ids:
-        workspace = session.execute(
-            select(Workspace).where(Workspace.org_id == org_id)
-        ).scalar_one_or_none()
-        if workspace is not None:
+        try:
+            workspace = session.execute(
+                select(Workspace).where(Workspace.org_id == org_id)
+            ).scalar_one_or_none()
+            if workspace is None:
+                continue
+
             schedule_followup_sync(
                 session,
                 workspace,
                 reason="workspace_imported",
             )
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            schedule_warnings.append(
+                {
+                    "org_id": org_id,
+                    "message": f"failed to schedule follow-up sync: {exc}",
+                }
+            )
 
-    session.commit()
     refreshed_workspaces = (
         session.execute(
             select(Workspace).where(Workspace.org_id.in_(imported_org_ids)).order_by(Workspace.org_id)
@@ -162,7 +184,11 @@ async def import_team(
             reason="workspace_imported",
             include_details=False,
         ),
-        extra={"imported": imported, "updated_records": imported_payload},
+        extra={
+            "imported": imported,
+            "updated_records": imported_payload,
+            "schedule_warnings": schedule_warnings,
+        },
     )
 
 
@@ -189,7 +215,7 @@ def get_workspace_members(
     ]
 
 
-@router.get("/api/workspaces/{id}/sync")
+@router.post("/api/workspaces/{id}/sync")
 async def sync_workspace(
     id: str,
     session: Session = Depends(get_session),

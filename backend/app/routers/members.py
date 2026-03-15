@@ -55,6 +55,10 @@ async def delete_member(
     account_id = workspace.account_id or workspace.org_id
     access_token = await resolve_access_token(workspace)
 
+    removed_member_id = row.id
+    removed_record = serialize_member_row(row)
+    removed_record["status"] = "removed"
+
     remote_user_id = payload.user_id or row.remote_id
     if remote_user_id:
         try:
@@ -64,9 +68,11 @@ async def delete_member(
                 remote_user_id,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=502,
+                detail=f"failed to remove member upstream: {exc}",
+            ) from exc
 
-    row.status = "removed"
     if workspace.member_count > 0:
         workspace.member_count -= 1
     schedule_followup_sync(
@@ -79,12 +85,12 @@ async def delete_member(
         action="member_kick",
         workspace=workspace,
         session=session,
-        updated_record=serialize_member_row(row),
+        updated_record=removed_record,
         refresh_hint=build_refresh_hint(
             scope="workspace_detail",
             org_id=workspace.org_id,
             reason="member_kicked",
             include_details=True,
         ),
-        extra={"member_id": row.id, "status": row.status},
+        extra={"member_id": removed_member_id, "status": "removed"},
     )

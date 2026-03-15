@@ -43,6 +43,8 @@
 html,
 body {
   min-height: 100%;
+  background: #090b10;
+  overflow-x: hidden;
 }
 
 body {
@@ -86,7 +88,7 @@ textarea {
 }
 
 .dashboard-layout {
-  width: min(1240px, calc(100vw - 32px));
+  width: min(1240px, calc(100% - 32px));
   margin: 0 auto;
   padding: 42px 0 64px;
   display: flex;
@@ -1577,7 +1579,7 @@ textarea {
 
 @media (max-width: 780px) {
   .dashboard-layout {
-    width: min(100vw - 20px, 100%);
+    width: min(100% - 20px, 100%);
     padding-top: 26px;
   }
 

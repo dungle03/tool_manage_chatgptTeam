@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from jwt import PyJWTError
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -132,6 +133,24 @@ def build_action_response(
     if extra:
         payload.update(extra)
     return payload
+
+
+def _persist_sync_failure(
+    session: Session,
+    workspace: Workspace,
+    *,
+    error_message: str,
+) -> Workspace:
+    session.rollback()
+    managed_workspace = session.get(Workspace, workspace.id) if workspace.id is not None else None
+    if managed_workspace is None:
+        managed_workspace = workspace
+    managed_workspace.status = "error"
+    managed_workspace.sync_error = error_message
+    managed_workspace.sync_finished_at = utc_now()
+    _schedule_retry_after_failure(session, managed_workspace)
+    session.commit()
+    return managed_workspace
 
 
 def build_sync_in_progress_payload(workspace: Workspace, session: Session) -> dict[str, Any]:
@@ -269,7 +288,6 @@ def schedule_followup_sync(
     )
     workspace.sync_reason = reason
     workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
-    session.flush()
 
     if publish_event:
         _publish_schedule_event(workspace, pending_invites)
@@ -418,14 +436,14 @@ def get_current_user_role(workspace: Workspace, session: Session) -> str:
         token_user_id = normalize_identity(
             chatgpt_service.extract_user_id(workspace.access_token)
         )
-    except Exception:
+    except (PyJWTError, ValueError, TypeError):
         token_user_id = None
 
     try:
         token_email = normalize_identity(
             chatgpt_service.extract_email(workspace.access_token)
         )
-    except Exception:
+    except (PyJWTError, ValueError, TypeError):
         token_email = None
 
     members = (
@@ -463,7 +481,7 @@ async def resolve_access_token(workspace: Workspace) -> str:
                 refreshed.get("session_token") or workspace.session_token
             )
             return workspace.access_token
-        except Exception:
+        except RuntimeError:
             if workspace.access_token:
                 return workspace.access_token
             raise
@@ -558,14 +576,14 @@ def _build_current_user_role_map(
                 token_user_id = normalize_identity(
                     chatgpt_service.extract_user_id(workspace.access_token)
                 )
-            except Exception:
+            except (PyJWTError, ValueError, TypeError):
                 token_user_id = None
 
             try:
                 token_email = normalize_identity(
                     chatgpt_service.extract_email(workspace.access_token)
                 )
-            except Exception:
+            except (PyJWTError, ValueError, TypeError):
                 token_email = None
 
         token_identity_by_org[workspace.org_id] = (token_user_id, token_email)
@@ -836,11 +854,11 @@ async def sync_workspace_data(
                 _publish_schedule_event(workspace, pending_invites)
             return payload
         except HTTPException as exc:
-            workspace.status = "error"
-            workspace.sync_error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-            workspace.sync_finished_at = utc_now()
-            _schedule_retry_after_failure(session, workspace)
-            session.commit()
+            workspace = _persist_sync_failure(
+                session,
+                workspace,
+                error_message=exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+            )
             if publish_events:
                 workspace_event_broker.publish(
                     "sync_failed",
@@ -851,11 +869,11 @@ async def sync_workspace_data(
                 _publish_schedule_event(workspace, _pending_invite_count(session, workspace.org_id))
             raise
         except Exception as exc:
-            workspace.status = "error"
-            workspace.sync_error = str(exc)
-            workspace.sync_finished_at = utc_now()
-            _schedule_retry_after_failure(session, workspace)
-            session.commit()
+            workspace = _persist_sync_failure(
+                session,
+                workspace,
+                error_message=str(exc),
+            )
             if publish_events:
                 workspace_event_broker.publish(
                     "sync_failed",
@@ -864,7 +882,10 @@ async def sync_workspace_data(
                     error={"message": workspace.sync_error},
                 )
                 _publish_schedule_event(workspace, _pending_invite_count(session, workspace.org_id))
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=502,
+                detail=f"workspace sync failed: {exc}",
+            ) from exc
 
 
 def list_stale_workspace_ids(session: Session) -> list[str]:
@@ -969,8 +990,11 @@ async def _background_sync_loop(session_factory: Any, stop_event: asyncio.Event)
     while not stop_event.is_set():
         try:
             await run_sync_cycle(session_factory)
-        except Exception:
-            logger.exception("Background sync loop error")
+        except Exception as exc:
+            logger.exception(
+                "Background sync loop error while running sync cycle: %s",
+                exc,
+            )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=SYNC_LOOP_INTERVAL_SECONDS)
         except TimeoutError:

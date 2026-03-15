@@ -31,7 +31,7 @@ export async function getWorkspaceMembers(orgId: string): Promise<Member[]> {
 }
 
 export async function syncWorkspace(orgId: string): Promise<WorkspaceSyncResult> {
-  return requestJson<WorkspaceSyncResult>(`/api/workspaces/${orgId}/sync`, "GET");
+  return requestJson<WorkspaceSyncResult>(`/api/workspaces/${orgId}/sync`, "POST");
 }
 
 export async function importTeam(payload: {
@@ -117,9 +117,17 @@ async function requestJson<T = unknown>(url: string, method: string, body?: unkn
       let detail = `HTTP ${res.status}`;
       try {
         const data = await res.json();
-        detail = data?.detail ?? detail;
+        const backendDetail = typeof data?.detail === "string" ? data.detail.trim() : "";
+        if (backendDetail) {
+          detail = backendDetail.startsWith("HTTP ")
+            ? backendDetail
+            : `HTTP ${res.status}: ${backendDetail}`;
+        }
       } catch {
-        // ignore
+        const fallbackText = (await res.text().catch(() => "")).trim();
+        if (fallbackText) {
+          detail = `HTTP ${res.status}: ${fallbackText}`;
+        }
       }
       throw new Error(detail);
     }
