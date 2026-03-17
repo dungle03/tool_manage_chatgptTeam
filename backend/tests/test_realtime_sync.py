@@ -480,3 +480,62 @@ def test_sync_workspace_data_persists_error_state_after_commit_failure(seed_data
 def test_workspace_events_path_is_registered_in_openapi():
     paths = set(app.openapi()["paths"].keys())
     assert "/api/events/workspaces" in paths
+
+
+def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(seed_data, monkeypatch):
+    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
+        return {"access_token": "fresh-token", "session_token": _session_token}
+
+    async def fake_get_members(_self, _access_token, _account_id):
+        return []
+
+    async def fake_get_invites(_self, _access_token, _account_id):
+        raise RuntimeError("account_deactivated")
+
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
+    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        workspace_id = workspace.id
+
+        original_rollback = session.rollback
+        rollback_calls = {"count": 0}
+
+        def deleting_rollback():
+            rollback_calls["count"] += 1
+            original_rollback()
+            if rollback_calls["count"] == 1:
+                cleanup_session = SessionLocal()
+                try:
+                    deleted = cleanup_session.get(Workspace, workspace_id)
+                    if deleted is not None:
+                        cleanup_session.query(Invite).where(Invite.org_id == deleted.org_id).delete()
+                        cleanup_session.delete(deleted)
+                        cleanup_session.commit()
+                finally:
+                    cleanup_session.close()
+
+        session.rollback = deleting_rollback
+
+        raised_exception = None
+        try:
+            __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="auto"))
+        except Exception as exc:
+            raised_exception = exc
+
+        from fastapi import HTTPException
+
+        assert isinstance(raised_exception, HTTPException)
+        assert raised_exception.status_code == 502
+        assert raised_exception.detail == "workspace sync failed: account_deactivated"
+
+        verification_session = SessionLocal()
+        try:
+            assert verification_session.get(Workspace, workspace_id) is None
+        finally:
+            verification_session.close()
+    finally:
+        session.close()

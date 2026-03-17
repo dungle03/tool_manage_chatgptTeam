@@ -137,14 +137,18 @@ def build_action_response(
 
 def _persist_sync_failure(
     session: Session,
-    workspace: Workspace,
     *,
+    workspace_id: int | None,
     error_message: str,
-) -> Workspace:
+) -> Workspace | None:
     session.rollback()
-    managed_workspace = session.get(Workspace, workspace.id) if workspace.id is not None else None
+    if workspace_id is None:
+        return None
+
+    managed_workspace = session.get(Workspace, workspace_id)
     if managed_workspace is None:
-        managed_workspace = workspace
+        return None
+
     managed_workspace.status = "error"
     managed_workspace.sync_error = error_message
     managed_workspace.sync_finished_at = utc_now()
@@ -703,24 +707,26 @@ async def sync_workspace_data(
         raise HTTPException(status_code=409, detail="workspace sync already in progress")
 
     async with lock:
+        workspace_id = workspace.id
+        workspace_org_id = workspace.org_id
         now = utc_now()
         workspace.status = "syncing"
         workspace.sync_error = None
         workspace.sync_started_at = now
         workspace.next_sync_at = None
         workspace.sync_priority = _priority_for_workspace(
-            workspace, _pending_invite_count(session, workspace.org_id), now
+            workspace, _pending_invite_count(session, workspace_org_id), now
         )
         session.commit()
 
         if publish_events:
             workspace_event_broker.publish(
                 "sync_started",
-                org_id=workspace.org_id,
+                org_id=workspace_org_id,
                 trigger=trigger,
             )
 
-        account_id = workspace.account_id or workspace.org_id
+        account_id = workspace.account_id or workspace_org_id
 
         try:
             access_token = await resolve_access_token(workspace)
@@ -856,32 +862,46 @@ async def sync_workspace_data(
         except HTTPException as exc:
             workspace = _persist_sync_failure(
                 session,
-                workspace,
+                workspace_id=workspace_id,
                 error_message=exc.detail if isinstance(exc.detail, str) else str(exc.detail),
             )
             if publish_events:
                 workspace_event_broker.publish(
                     "sync_failed",
-                    org_id=workspace.org_id,
+                    org_id=workspace_org_id,
                     trigger=trigger,
-                    error={"message": workspace.sync_error},
+                    error={
+                        "message": workspace.sync_error if workspace is not None else (
+                            exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                        )
+                    },
                 )
-                _publish_schedule_event(workspace, _pending_invite_count(session, workspace.org_id))
+                if workspace is not None:
+                    _publish_schedule_event(
+                        workspace,
+                        _pending_invite_count(session, workspace_org_id),
+                    )
             raise
         except Exception as exc:
             workspace = _persist_sync_failure(
                 session,
-                workspace,
+                workspace_id=workspace_id,
                 error_message=str(exc),
             )
             if publish_events:
                 workspace_event_broker.publish(
                     "sync_failed",
-                    org_id=workspace.org_id,
+                    org_id=workspace_org_id,
                     trigger=trigger,
-                    error={"message": workspace.sync_error},
+                    error={
+                        "message": workspace.sync_error if workspace is not None else str(exc)
+                    },
                 )
-                _publish_schedule_event(workspace, _pending_invite_count(session, workspace.org_id))
+                if workspace is not None:
+                    _publish_schedule_event(
+                        workspace,
+                        _pending_invite_count(session, workspace_org_id),
+                    )
             raise HTTPException(
                 status_code=502,
                 detail=f"workspace sync failed: {exc}",
