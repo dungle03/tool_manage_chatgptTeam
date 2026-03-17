@@ -8,6 +8,7 @@ export type Workspace = {
   member_limit: number;
   pending_invites?: number;
   expires_at: string | null;
+  access_token_expires_at?: string | null;
   last_sync: string | null;
   created_at: string;
   current_user_role: string;
@@ -115,3 +116,9 @@ export type WorkspaceSyncResult = MutationResult<never> & {
 export type WorkspaceDeleteResult = MutationResult<never> & {
   deleted_org_id: string;
 };
+
+export type WorkspaceRenameResult = MutationResult<never> & {
+  name: string;
+};
+
+export type WorkspaceTokenUpdateResult = MutationResult<never>;

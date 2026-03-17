@@ -1,5 +1,6 @@
 import asyncio
 import random
+from datetime import datetime, timezone
 from typing import Any
 
 import jwt
@@ -296,12 +297,40 @@ class ChatGPTService:
             raise RuntimeError(result.get("error", "failed to delete member"))
         return result["data"]
 
+    async def rename_workspace(
+        self, access_token: str, account_id: str, name: str
+    ) -> dict[str, Any]:
+        result = await self._request(
+            "PATCH",
+            f"/accounts/{account_id}",
+            headers=self._build_headers(
+                access_token=access_token,
+                account_id=account_id,
+                extra={"Content-Type": "application/json"},
+            ),
+            json_data={"name": name},
+        )
+        if not result["success"]:
+            raise RuntimeError(result.get("error", "failed to rename workspace"))
+        return result["data"]
+
     def decode_access_token_claims(self, access_token: str) -> dict[str, Any]:
         return jwt.decode(
             access_token,
             options={"verify_signature": False},
             algorithms=["HS256", "RS256"],
         )
+
+    def extract_access_token_expiry(self, access_token: str) -> Any:
+        claims = self.decode_access_token_claims(access_token)
+        exp = claims.get("exp")
+        if exp is None:
+            return None
+
+        try:
+            return datetime.fromtimestamp(int(exp), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            return None
 
     def extract_email(self, access_token: str) -> str | None:
         claims = self.decode_access_token_claims(access_token)

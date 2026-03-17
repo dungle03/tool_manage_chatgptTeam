@@ -7,7 +7,9 @@ import type {
   WorkspaceDeleteResult,
   WorkspaceEvent,
   WorkspaceImportResult,
+  WorkspaceRenameResult,
   WorkspaceSyncResult,
+  WorkspaceTokenUpdateResult,
 } from "@/types/api";
 
 // Lấy admin token từ env (nếu có), dev mode không cần
@@ -65,6 +67,16 @@ export async function cancelInvite(payload: { org_id: string; invite_id: string;
 
 export async function deleteWorkspace(orgId: string): Promise<WorkspaceDeleteResult> {
   return requestJson<WorkspaceDeleteResult>(`/api/workspaces/${orgId}`, "DELETE");
+}
+
+export async function renameWorkspace(orgId: string, name: string): Promise<WorkspaceRenameResult> {
+  return requestJson<WorkspaceRenameResult>(`/api/workspaces/${orgId}/name`, "PATCH", { name });
+}
+
+export async function updateWorkspaceToken(orgId: string, accessToken: string): Promise<WorkspaceTokenUpdateResult> {
+  return requestJson<WorkspaceTokenUpdateResult>(`/api/workspaces/${orgId}/token`, "PATCH", {
+    access_token: accessToken,
+  });
 }
 
 export function invalidateApiCache() {

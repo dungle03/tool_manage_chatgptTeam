@@ -7,6 +7,10 @@ import { MemberTable } from "@/components/member-table";
 import { InvitePanel } from "@/components/invite-panel";
 import { InviteList } from "@/components/invite-list";
 import { ImportDialog } from "@/components/import-dialog";
+import { DashboardViewToggle, type DashboardViewMode } from "@/components/dashboard-view-toggle";
+import { CompactWorkspaceCard } from "@/components/compact-workspace-card";
+import { RenameWorkspaceDialog } from "@/components/rename-workspace-dialog";
+import { UpdateTokenDialog } from "@/components/update-token-dialog";
 import {
   buildWorkspaceEventsUrl,
   getWorkspaces,
@@ -19,6 +23,8 @@ import {
   deleteWorkspace,
   resendInvite,
   cancelInvite,
+  renameWorkspace,
+  updateWorkspaceToken,
 } from "@/lib/api";
 import {
   applyWorkspaceSummaryList,
@@ -66,7 +72,33 @@ function getErrorMessage(error: unknown): string {
   return "Lỗi không xác định";
 }
 
-function getActionErrorCopy(action: "sync" | "kick" | "resend" | "revoke" | "delete_workspace", error: unknown): string {
+function formatDashboardSyncTime(lastSync?: string | null): string {
+  if (!lastSync) return "Chưa sync";
+  const diff = Math.floor((Date.now() - new Date(lastSync).getTime()) / 1000);
+  if (diff < 60) return `${diff}s trước`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m trước`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h trước`;
+  return `${Math.floor(diff / 86400)}d trước`;
+}
+
+function formatDashboardDateLabel(prefix: string, timestamp?: string | null): string {
+  if (!timestamp) return `${prefix}: Chưa rõ`;
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return `${prefix}: Chưa rõ`;
+  }
+
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `${prefix}: ${day}/${month}/${year}`;
+}
+
+function getActionErrorCopy(
+  action: "sync" | "kick" | "resend" | "revoke" | "delete_workspace" | "rename_workspace",
+  error: unknown
+): string {
   const detail = getErrorMessage(error);
 
   if (detail.includes("HTTP 404")) {
@@ -91,6 +123,7 @@ function getActionErrorCopy(action: "sync" | "kick" | "resend" | "revoke" | "del
     resend: "Chưa thể gửi lại lời mời ở thời điểm này.",
     revoke: "Chưa thể thu hồi lời mời ở thời điểm này.",
     delete_workspace: "Chưa thể xóa workspace ở thời điểm này.",
+    rename_workspace: "Chưa thể đổi tên workspace ở thời điểm này.",
   } satisfies Record<typeof action, string>;
 
   return detail === "Lỗi không xác định"
@@ -104,6 +137,15 @@ export default function DashboardPage() {
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [viewMode, setViewMode] = useState<DashboardViewMode>("compact");
+  const [focusedWorkspaceId, setFocusedWorkspaceId] = useState<string | null>(null);
+  const [managedWorkspaceId, setManagedWorkspaceId] = useState<string | null>(null);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<Workspace | null>(null);
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [tokenWorkspace, setTokenWorkspace] = useState<Workspace | null>(null);
+  const [tokenSubmitting, setTokenSubmitting] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -674,6 +716,9 @@ export default function DashboardPage() {
         delete next[deletingWs.org_id];
         return next;
       });
+      if (focusedWorkspaceId === deletingWs.org_id) {
+        setFocusedWorkspaceId(null);
+      }
       void triggerPostActionRefresh(undefined, {
         includeDetails: result.refresh_hint?.include_details ?? false,
       });
@@ -689,6 +734,94 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleRenameWorkspace(nextName: string) {
+    if (!renamingWorkspace) {
+      return;
+    }
+
+    setRenameSubmitting(true);
+    setRenameError(null);
+
+    try {
+      const result = await renameWorkspace(renamingWorkspace.org_id, nextName);
+      applyWorkspaceSummary(result.updated_summary);
+      if (result.updated_summary) {
+        mergeWorkspaceRecord(result.updated_summary);
+      }
+      invalidateApiCache();
+      void triggerPostActionRefreshRef.current?.(renamingWorkspace.org_id, {
+        immediate: true,
+        includeDetails: result.refresh_hint?.include_details ?? false,
+      });
+      showToast(
+        "Đổi tên thành công",
+        `Workspace đã được đổi tên thành "${result.name}".`,
+        "success"
+      );
+      setRenamingWorkspace(null);
+    } catch (error) {
+      const message = getActionErrorCopy("rename_workspace", error);
+      setRenameError(message);
+      showToast("Không thể đổi tên workspace", message, "error");
+    } finally {
+      setRenameSubmitting(false);
+    }
+  }
+
+  async function handleUpdateWorkspaceToken(accessToken: string) {
+    if (!tokenWorkspace) {
+      return;
+    }
+
+    setTokenSubmitting(true);
+    setTokenError(null);
+
+    try {
+      const result = await updateWorkspaceToken(tokenWorkspace.org_id, accessToken);
+      applyWorkspaceSummary(result.updated_summary);
+      if (result.updated_summary) {
+        mergeWorkspaceRecord(result.updated_summary);
+      }
+      invalidateApiCache();
+      void triggerPostActionRefreshRef.current?.(tokenWorkspace.org_id, {
+        immediate: true,
+        includeDetails: result.refresh_hint?.include_details ?? false,
+      });
+      showToast(
+        "Cập nhật token thành công",
+        `Workspace "${tokenWorkspace.name}" đã nhận token mới.`,
+        "success"
+      );
+      setTokenWorkspace(null);
+    } catch (error) {
+      const message = getActionErrorCopy("sync", error);
+      setTokenError(message);
+      showToast("Không thể cập nhật token", message, "error");
+    } finally {
+      setTokenSubmitting(false);
+    }
+  }
+
+  function handleOpenRename(workspace: Workspace) {
+    setRenameError(null);
+    setRenamingWorkspace(workspace);
+  }
+
+  function handleOpenTokenUpdate(workspace: Workspace) {
+    setTokenError(null);
+    setTokenWorkspace(workspace);
+  }
+
+  async function handleManageWorkspace(workspace: Workspace) {
+    setManagedWorkspaceId(workspace.org_id);
+    setFocusedWorkspaceId(workspace.org_id);
+
+    const state = wsStatesRef.current[workspace.org_id] ?? DEFAULT_WS_STATE;
+    if (!state.loadedMembers && (Boolean(workspace.last_sync) || workspace.member_count > 0)) {
+      await loadMembers(workspace.org_id);
+    }
+  }
+
   const totalMembers = workspaces.reduce((sum, workspace) => sum + (workspace.member_count ?? 0), 0);
   const totalPending = workspaces.reduce(
     (sum, workspace) => sum + (workspace.pending_invites ?? 0),
@@ -701,18 +834,26 @@ export default function DashboardPage() {
     () => [...workspaces].sort(compareWorkspaceExpiry),
     [workspaces]
   );
+  const managedWorkspace = managedWorkspaceId
+    ? sortedWorkspaces.find((workspace) => workspace.org_id === managedWorkspaceId) ?? null
+    : null;
+  const managedWorkspaceState = managedWorkspace
+    ? wsStates[managedWorkspace.org_id] ?? DEFAULT_WS_STATE
+    : DEFAULT_WS_STATE;
+
 
   return (
-    <main className="dashboard-layout">
+    <main className={`dashboard-layout${viewMode === "compact" ? " dashboard-layout-compact" : ""}`}>
       <div className="dashboard-header">
         <div className="dashboard-header-copy">
           <span className="eyebrow">Workspace control center</span>
           <h1 className="dashboard-title">ChatGPT Team Manager</h1>
           <p className="dashboard-subtitle">
-            Theo dõi workspace, quản lý thành viên và xử lý lời mời trong một dashboard rõ ràng hơn.
+            Theo dõi workspace, quản lý thành viên và xử lý lời mời trong một dashboard.
           </p>
         </div>
         <div className="dashboard-header-actions">
+          <DashboardViewToggle value={viewMode} onChange={setViewMode} />
           <button
             className="btn btn-primary"
             onClick={() => setShowImport(true)}
@@ -754,170 +895,225 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="workspace-list">
-        {sortedWorkspaces.map((ws) => {
-          const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
-          const wsStatus =
-            ws.status === "live"
-              ? "synced"
-              : ws.status === "error"
-                ? "error"
-                : "warning";
+      {viewMode === "compact" ? (
+        <section className="compact-teams-section" aria-labelledby="compact-teams-heading">
+          <div className="compact-teams-section-header">
+            <div className="compact-teams-heading-block">
+              <span id="compact-teams-heading" className="compact-teams-kicker">Workspace collection</span>
+            </div>
+            <div className="compact-teams-divider" aria-hidden="true" />
+          </div>
 
-          return (
-            <WorkspaceCard
-              key={ws.org_id}
-              title={ws.name}
-              members={ws.member_count}
-              memberLimit={ws.member_limit}
-              status={wsStatus}
-              lastSync={ws.last_sync}
-              expiresAt={ws.expires_at}
-              syncing={state.syncing || ws.status === "syncing"}
-              isHot={Boolean(ws.is_hot)}
-              syncReason={ws.sync_reason}
-              onSync={() => handleSync(ws.org_id)}
-              onDelete={() => setDeletingWs(ws)}
-              onExpandedChange={(expanded) => {
-                if (
-                  expanded &&
-                  !state.loadedMembers &&
-                  (Boolean(ws.last_sync) || ws.member_count > 0)
-                ) {
-                  void loadMembers(ws.org_id);
-                }
-              }}
-              expandedContent={
-                <div className="workspace-detail">
-                  {!state.loadedMembers ? (
-                    <div className="section-panel section-panel-center">
-                      <div className="section-heading-row compact-heading-row">
-                        <div>
-                          <h3 className="section-heading">
-                            {state.syncing
-                              ? "Workspace đang đồng bộ dữ liệu"
-                              : ws.last_sync || ws.member_count > 0
-                                ? "Đang tải chi tiết workspace"
-                                : "Workspace data chưa được tải"}
-                          </h3>
-                          <p className="section-description">
-                            {state.syncing
-                              ? "Hệ thống đang sync workspace rồi tải members và invites mới nhất."
-                              : ws.last_sync || ws.member_count > 0
-                                ? "Đang đọc dữ liệu members và invites đã sync trước đó để hiển thị chi tiết workspace."
-                                : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
-                          </p>
-                          {ws.sync_error && (
-                            <p
-                              className="section-description"
-                              style={{ color: "#ff8f8f" }}
-                            >
-                              Lỗi gần nhất: {ws.sync_error}
+          <div className="compact-workspace-grid">
+            {sortedWorkspaces.map((ws) => {
+              const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
+              const wsStatus =
+                ws.status === "live"
+                  ? "synced"
+                  : ws.status === "error"
+                    ? "error"
+                    : "warning";
+
+              return (
+                <CompactWorkspaceCard
+                  key={ws.org_id}
+                  orgId={ws.org_id}
+                  title={ws.name}
+                  members={ws.member_count}
+                  memberLimit={ws.member_limit}
+                  pendingInvites={ws.pending_invites ?? 0}
+                  expiresAt={ws.expires_at}
+                  accessTokenExpiresAt={ws.access_token_expires_at}
+                  lastSync={ws.last_sync}
+                  syncing={state.syncing || ws.status === "syncing"}
+                  status={wsStatus}
+                  onRename={() => handleOpenRename(ws)}
+                  onUpdateToken={() => handleOpenTokenUpdate(ws)}
+                  onSync={() => handleSync(ws.org_id)}
+                  onDelete={() => setDeletingWs(ws)}
+                  onManage={() => void handleManageWorkspace(ws)}
+                />
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <div className="workspace-list">
+          {sortedWorkspaces.map((ws) => {
+            const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
+            const wsStatus =
+              ws.status === "live"
+                ? "synced"
+                : ws.status === "error"
+                  ? "error"
+                  : "warning";
+
+            return (
+              <WorkspaceCard
+                key={`${ws.org_id}-${focusedWorkspaceId === ws.org_id ? "focused" : "default"}`}
+                orgId={ws.org_id}
+                title={ws.name}
+                members={ws.member_count}
+                memberLimit={ws.member_limit}
+                status={wsStatus}
+                selected={focusedWorkspaceId === ws.org_id}
+                lastSync={ws.last_sync}
+                expiresAt={ws.expires_at}
+                accessTokenExpiresAt={ws.access_token_expires_at}
+                syncing={state.syncing || ws.status === "syncing"}
+                isHot={Boolean(ws.is_hot)}
+                syncReason={ws.sync_reason}
+                onRename={() => handleOpenRename(ws)}
+                onUpdateToken={() => handleOpenTokenUpdate(ws)}
+                onSync={() => handleSync(ws.org_id)}
+                onDelete={() => setDeletingWs(ws)}
+                onExpandedChange={(expanded) => {
+                  if (expanded) {
+                    setFocusedWorkspaceId(ws.org_id);
+                  } else if (focusedWorkspaceId === ws.org_id) {
+                    setFocusedWorkspaceId(null);
+                  }
+
+                  if (
+                    expanded &&
+                    !state.loadedMembers &&
+                    (Boolean(ws.last_sync) || ws.member_count > 0)
+                  ) {
+                    void loadMembers(ws.org_id);
+                  }
+                }}
+                expandedContent={
+                  <div className="workspace-detail">
+                    {!state.loadedMembers ? (
+                      <div className="section-panel section-panel-center">
+                        <div className="section-heading-row compact-heading-row">
+                          <div>
+                            <h3 className="section-heading">
+                              {state.syncing
+                                ? "Workspace đang đồng bộ dữ liệu"
+                                : ws.last_sync || ws.member_count > 0
+                                  ? "Đang tải chi tiết workspace"
+                                  : "Workspace data chưa được tải"}
+                            </h3>
+                            <p className="section-description">
+                              {state.syncing
+                                ? "Hệ thống đang sync workspace rồi tải members và invites mới nhất."
+                                : ws.last_sync || ws.member_count > 0
+                                  ? "Đang đọc dữ liệu members và invites đã sync trước đó để hiển thị chi tiết workspace."
+                                  : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
                             </p>
+                            {ws.sync_error && (
+                              <p
+                                className="section-description"
+                                style={{ color: "#ff8f8f" }}
+                              >
+                                Lỗi gần nhất: {ws.sync_error}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "12px",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {ws.last_sync || ws.member_count > 0 || state.syncing ? (
+                            <>
+                              <div className="loading-spinner" />
+                              <span className="workspace-helper-copy">
+                                {state.syncing
+                                  ? "Đang đồng bộ và tải chi tiết workspace..."
+                                  : "Đang tải dữ liệu chi tiết của workspace..."}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-primary"
+                                onClick={() => handleSync(ws.org_id)}
+                                disabled={state.syncing}
+                              >
+                                {state.syncing ? "Đang sync..." : "Sync workspace"}
+                              </button>
+                              <span className="workspace-helper-copy">
+                                Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.
+                              </span>
+                            </>
                           )}
                         </div>
                       </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "12px",
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        {ws.last_sync || ws.member_count > 0 || state.syncing ? (
-                          <>
-                            <div className="loading-spinner" />
-                            <span className="workspace-helper-copy">
-                              {state.syncing
-                                ? "Đang đồng bộ và tải chi tiết workspace..."
-                                : "Đang tải dữ liệu chi tiết của workspace..."}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => handleSync(ws.org_id)}
-                              disabled={state.syncing}
-                            >
-                              {state.syncing ? "Đang sync..." : "Sync workspace"}
-                            </button>
-                            <span className="workspace-helper-copy">
-                              Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="workspace-sections-grid">
-                      <div className="workspace-primary-column">
-                        <MemberTable
-                          members={state.members}
-                          busyMemberIds={state.busyMemberIds}
-                          onKick={
-                            ws.can_manage_members
-                              ? (memberId) => handleKick(ws.org_id, memberId)
-                              : undefined
-                          }
-                        />
-                      </div>
-
-                      <div className="workspace-side-column">
-                        <div className="section-panel invite-section-panel">
-                          <InvitePanel
-                            orgId={ws.org_id}
-                            onDone={({ invite, result }) => {
-                              if (invite) {
-                                updateWsState(ws.org_id, (current) => ({
-                                  invites: upsertInvite(current.invites, invite),
-                                  loadedMembers: true,
-                                }));
-                              }
-
-                              applyWorkspaceSummary(result.updated_summary);
-
-                              void triggerPostActionRefreshRef.current?.(ws.org_id, {
-                                includeDetails: result.refresh_hint?.include_details ?? !invite,
-                              });
-                            }}
+                    ) : (
+                      <div className="workspace-sections-grid">
+                        <div className="workspace-primary-column">
+                          <MemberTable
+                            members={state.members}
+                            busyMemberIds={state.busyMemberIds}
+                            onKick={
+                              ws.can_manage_members
+                                ? (memberId) => handleKick(ws.org_id, memberId)
+                                : undefined
+                            }
                           />
                         </div>
 
-                        {(() => {
-                          const pendingInvites = state.invites.filter(
-                            (invite) => invite.status === "pending"
-                          );
+                        <div className="workspace-side-column">
+                          <div className="section-panel invite-section-panel">
+                            <InvitePanel
+                              orgId={ws.org_id}
+                              onDone={({ invite, result }) => {
+                                if (invite) {
+                                  updateWsState(ws.org_id, (current) => ({
+                                    invites: upsertInvite(current.invites, invite),
+                                    loadedMembers: true,
+                                  }));
+                                }
 
-                          return pendingInvites.length > 0 ? (
-                            <div className="section-panel invite-section-panel">
-                              <InviteList
-                                invites={pendingInvites}
-                                busyInviteActions={state.inviteActionState}
-                                onResend={
-                                  ws.can_manage_members
-                                    ? (inviteId) => handleResendInvite(ws.org_id, inviteId)
-                                    : undefined
-                                }
-                                onRevoke={
-                                  ws.can_manage_members
-                                    ? (inviteId) => handleRevokeInvite(ws.org_id, inviteId)
-                                    : undefined
-                                }
-                              />
-                            </div>
-                          ) : null;
-                        })()}
+                                applyWorkspaceSummary(result.updated_summary);
+
+                                void triggerPostActionRefreshRef.current?.(ws.org_id, {
+                                  includeDetails: result.refresh_hint?.include_details ?? !invite,
+                                });
+                              }}
+                            />
+                          </div>
+
+                          {(() => {
+                            const pendingInvites = state.invites.filter(
+                              (invite) => invite.status === "pending"
+                            );
+
+                            return pendingInvites.length > 0 ? (
+                              <div className="section-panel invite-section-panel">
+                                <InviteList
+                                  invites={pendingInvites}
+                                  busyInviteActions={state.inviteActionState}
+                                  onResend={
+                                    ws.can_manage_members
+                                      ? (inviteId) => handleResendInvite(ws.org_id, inviteId)
+                                      : undefined
+                                  }
+                                  onRevoke={
+                                    ws.can_manage_members
+                                      ? (inviteId) => handleRevokeInvite(ws.org_id, inviteId)
+                                      : undefined
+                                  }
+                                />
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              }
-            />
-          );
-        })}
-      </div>
+                    )}
+                  </div>
+                }
+              />
+            );
+          })}
+        </div>
+      )}
 
       {showImport && (
         <ImportDialog
@@ -943,6 +1139,192 @@ export default function DashboardPage() {
               });
             }
           }}
+        />
+      )}
+
+      {managedWorkspace && (
+        <div className="dialog-overlay workspace-focus-overlay" onClick={() => setManagedWorkspaceId(null)}>
+          <div className="workspace-focus-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="workspace-focus-header">
+              <div className="workspace-focus-copy">
+                <span className="workspace-focus-eyebrow">Manage Team</span>
+                <h2>{managedWorkspace.name}</h2>
+                <p className="workspace-focus-subtitle">
+                  <span>{managedWorkspace.member_count} members</span>
+                  <span className="meta-dot">•</span>
+                  <span>{formatDashboardDateLabel("Plan", managedWorkspace.expires_at)}</span>
+                  <span className="meta-dot">•</span>
+                  <span>Last sync {formatDashboardSyncTime(managedWorkspace.last_sync)}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                className="compact-toolbar-icon workspace-focus-close"
+                onClick={() => setManagedWorkspaceId(null)}
+                aria-label={`Đóng workspace ${managedWorkspace.name}`}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                  <path d="M5 5l10 10" />
+                  <path d="M15 5 5 15" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="workspace-focus-body workspace-detail">
+              {!managedWorkspaceState.loadedMembers ? (
+                <div className="section-panel section-panel-center">
+                  <div className="section-heading-row compact-heading-row">
+                    <div>
+                      <h3 className="section-heading">
+                        {managedWorkspaceState.syncing
+                          ? "Workspace đang đồng bộ dữ liệu"
+                          : managedWorkspace.last_sync || managedWorkspace.member_count > 0
+                            ? "Đang tải chi tiết workspace"
+                            : "Workspace data chưa được tải"}
+                      </h3>
+                      <p className="section-description">
+                        {managedWorkspaceState.syncing
+                          ? "Hệ thống đang sync workspace rồi tải members và invites mới nhất."
+                          : managedWorkspace.last_sync || managedWorkspace.member_count > 0
+                            ? "Đang đọc dữ liệu members và invites đã sync trước đó để hiển thị chi tiết workspace."
+                            : "Đồng bộ ngay để lấy danh sách thành viên và lời mời mới nhất từ ChatGPT."}
+                      </p>
+                      {managedWorkspace.sync_error && (
+                        <p className="section-description" style={{ color: "#ff8f8f" }}>
+                          Lỗi gần nhất: {managedWorkspace.sync_error}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {managedWorkspace.last_sync || managedWorkspace.member_count > 0 || managedWorkspaceState.syncing ? (
+                      <>
+                        <div className="loading-spinner" />
+                        <span className="workspace-helper-copy">
+                          {managedWorkspaceState.syncing
+                            ? "Đang đồng bộ và tải chi tiết workspace..."
+                            : "Đang tải dữ liệu chi tiết của workspace..."}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => handleSync(managedWorkspace.org_id)}
+                          disabled={managedWorkspaceState.syncing}
+                        >
+                          {managedWorkspaceState.syncing ? "Đang sync..." : "Sync workspace"}
+                        </button>
+                        <span className="workspace-helper-copy">
+                          Workspace này chưa có dữ liệu cục bộ, hãy sync lần đầu để tải members và invites.
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="workspace-sections-grid">
+                  <div className="workspace-primary-column">
+                    <MemberTable
+                      members={managedWorkspaceState.members}
+                      busyMemberIds={managedWorkspaceState.busyMemberIds}
+                      onKick={
+                        managedWorkspace.can_manage_members
+                          ? (memberId) => handleKick(managedWorkspace.org_id, memberId)
+                          : undefined
+                      }
+                    />
+                  </div>
+
+                  <div className="workspace-side-column">
+                    <div className="section-panel invite-section-panel">
+                      <InvitePanel
+                        orgId={managedWorkspace.org_id}
+                        onDone={({ invite, result }) => {
+                          if (invite) {
+                            updateWsState(managedWorkspace.org_id, (current) => ({
+                              invites: upsertInvite(current.invites, invite),
+                              loadedMembers: true,
+                            }));
+                          }
+
+                          applyWorkspaceSummary(result.updated_summary);
+
+                          void triggerPostActionRefreshRef.current?.(managedWorkspace.org_id, {
+                            includeDetails: result.refresh_hint?.include_details ?? !invite,
+                          });
+                        }}
+                      />
+                    </div>
+
+                    {(() => {
+                      const pendingInvites = managedWorkspaceState.invites.filter(
+                        (invite) => invite.status === "pending"
+                      );
+
+                      return pendingInvites.length > 0 ? (
+                        <div className="section-panel invite-section-panel">
+                          <InviteList
+                            invites={pendingInvites}
+                            busyInviteActions={managedWorkspaceState.inviteActionState}
+                            onResend={
+                              managedWorkspace.can_manage_members
+                                ? (inviteId) => handleResendInvite(managedWorkspace.org_id, inviteId)
+                                : undefined
+                            }
+                            onRevoke={
+                              managedWorkspace.can_manage_members
+                                ? (inviteId) => handleRevokeInvite(managedWorkspace.org_id, inviteId)
+                                : undefined
+                            }
+                          />
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renamingWorkspace && (
+        <RenameWorkspaceDialog
+          workspaceName={renamingWorkspace.name}
+          workspaceOrgId={renamingWorkspace.org_id}
+          submitting={renameSubmitting}
+          error={renameError}
+          onClose={() => {
+            if (!renameSubmitting) {
+              setRenameError(null);
+              setRenamingWorkspace(null);
+            }
+          }}
+          onSubmit={handleRenameWorkspace}
+        />
+      )}
+
+      {tokenWorkspace && (
+        <UpdateTokenDialog
+          workspaceName={tokenWorkspace.name}
+          workspaceOrgId={tokenWorkspace.org_id}
+          submitting={tokenSubmitting}
+          error={tokenError}
+          onClose={() => {
+            if (!tokenSubmitting) {
+              setTokenError(null);
+              setTokenWorkspace(null);
+            }
+          }}
+          onSubmit={handleUpdateWorkspaceToken}
         />
       )}
 

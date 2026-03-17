@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useState, ReactNode } from "react";
+import { memo, useEffect, useState, ReactNode } from "react";
 
 type WorkspaceCardProps = {
+  orgId: string;
   title: string;
   members: number;
   memberLimit: number;
@@ -10,14 +11,18 @@ type WorkspaceCardProps = {
   selected?: boolean;
   lastSync?: string | null;
   expiresAt?: string | null;
+  accessTokenExpiresAt?: string | null;
   syncing?: boolean;
   isHot?: boolean;
   syncReason?: string | null;
   expandedContent?: ReactNode;
+  onRename?: () => void;
+  onUpdateToken?: () => void;
   onSync?: () => void;
   onDelete?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
 };
+
 
 function formatSyncTime(lastSync?: string | null): string {
   if (!lastSync) return "Chưa sync";
@@ -43,21 +48,41 @@ function formatReason(reason?: string | null): string | null {
   return reason;
 }
 
-function formatExpiryDate(expiresAt?: string | null): string {
-  if (!expiresAt) return "Hết hạn: Chưa rõ";
+function formatDateLabel(prefix: string, timestamp?: string | null): string {
+  if (!timestamp) return `${prefix}: Chưa rõ`;
 
-  const date = new Date(expiresAt);
+  const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
-    return "Hết hạn: Chưa rõ";
+    return `${prefix}: Chưa rõ`;
   }
 
   const day = String(date.getUTCDate()).padStart(2, "0");
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const year = date.getUTCFullYear();
-  return `Hết hạn: ${day}/${month}/${year}`;
+  return `${prefix}: ${day}/${month}/${year}`;
+}
+
+function formatTokenTimeRemaining(accessTokenExpiresAt?: string | null): string {
+  if (!accessTokenExpiresAt) return "Token hết hạn: Chưa rõ";
+
+  const target = new Date(accessTokenExpiresAt).getTime();
+  if (Number.isNaN(target)) {
+    return "Token hết hạn: Chưa rõ";
+  }
+
+  const diffSeconds = Math.max(Math.floor((target - Date.now()) / 1000), 0);
+  const days = Math.floor(diffSeconds / 86400);
+  const hours = Math.floor((diffSeconds % 86400) / 3600);
+  const minutes = Math.floor((diffSeconds % 3600) / 60);
+
+  if (days > 0) return `Token hết hạn sau ${days}d ${hours}h`;
+  if (hours > 0) return `Token hết hạn sau ${hours}h ${minutes}m`;
+  if (minutes > 0) return `Token hết hạn sau ${minutes}m`;
+  return "Token hết hạn: sắp tới";
 }
 
 function WorkspaceCardComponent({
+  orgId,
   title,
   members,
   memberLimit,
@@ -65,10 +90,13 @@ function WorkspaceCardComponent({
   selected,
   lastSync,
   expiresAt,
+  accessTokenExpiresAt,
   syncing = false,
   isHot = false,
   syncReason,
   expandedContent,
+  onRename,
+  onUpdateToken,
   onSync,
   onDelete,
   onExpandedChange,
@@ -80,6 +108,13 @@ function WorkspaceCardComponent({
   const badgeClass =
     status === "synced" ? "badge-synced" : status === "warning" ? "badge-warning" : "badge-error";
   const reasonLabel = formatReason(syncReason);
+
+  useEffect(() => {
+    if (selected === undefined) {
+      return;
+    }
+    setExpanded(selected);
+  }, [selected]);
 
   return (
     <section className={`workspace-card${expanded ? " selected" : ""}`}>
@@ -94,7 +129,7 @@ function WorkspaceCardComponent({
               return next;
             });
           }}
-          id={`workspace-toggle-${title.replace(/\s+/g, "-").toLowerCase()}`}
+          id={`workspace-toggle-${orgId}`}
         >
           <div className="workspace-card-heading">
             <span
@@ -108,12 +143,26 @@ function WorkspaceCardComponent({
             <div className="workspace-title-stack">
               <div className="workspace-title-row">
                 <span className="workspace-card-title">{title}</span>
+                <button
+                  type="button"
+                  className="workspace-rename-trigger"
+                  id={`workspace-rename-default-${orgId}`}
+                  aria-label={`Đổi tên workspace ${title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRename?.();
+                  }}
+                >
+                  ✎
+                </button>
                 <span className={`workspace-badge ${badgeClass}`}>{statusLabel}</span>
                 {isHot && <span className="workspace-badge badge-warning">Hot</span>}
               </div>
-              <div className="workspace-meta-subline">{formatExpiryDate(expiresAt)}</div>
+              <div className="workspace-meta-subline">{formatTokenTimeRemaining(accessTokenExpiresAt)}</div>
               <div className="workspace-meta-row">
                 <span>{members} members</span>
+                <span className="meta-dot">•</span>
+                <span>{formatDateLabel("Plan", expiresAt)}</span>
                 <span className="meta-dot">•</span>
                 <span>Last sync {formatSyncTime(lastSync)}</span>
                 {reasonLabel && (
@@ -143,11 +192,39 @@ function WorkspaceCardComponent({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              onUpdateToken?.();
+            }}
+            className="btn btn-secondary btn-compact workspace-sync-btn"
+            id={`workspace-token-${orgId}`}
+            aria-label={`Cập nhật token cho workspace ${title}`}
+            title="Cập nhật token"
+          >
+            <span className="sync-icon" aria-hidden="true">
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ color: "#f5c451" }}
+              >
+                <circle cx="7.2" cy="10" r="2.7" />
+                <path d="M9.9 10h6.35" />
+                <path d="M13.2 10v2.2" />
+                <path d="M15.55 10v1.55" />
+              </svg>
+            </span>
+            <span className="workspace-sync-label">Token</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
               onSync?.();
             }}
             disabled={syncing}
             className="btn btn-secondary btn-compact workspace-sync-btn"
-            id={`workspace-sync-${title.replace(/\s+/g, "-").toLowerCase()}`}
+            id={`workspace-sync-${orgId}`}
           >
             <span className={`sync-icon${syncing ? " is-spinning" : ""}`} aria-hidden="true">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -165,7 +242,7 @@ function WorkspaceCardComponent({
               onDelete?.();
             }}
             className="btn btn-danger btn-compact"
-            id={`workspace-delete-${title.replace(/\s+/g, "-").toLowerCase()}`}
+            id={`workspace-delete-${orgId}`}
           >
             Delete
           </button>

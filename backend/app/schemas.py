@@ -12,6 +12,7 @@ class WorkspaceOut(BaseModel):
     member_count: int
     member_limit: int
     expires_at: datetime | None = None
+    access_token_expires_at: datetime | None = None
     last_sync: datetime | None = None
     created_at: datetime
 
@@ -61,6 +62,14 @@ class WorkspaceImportRequest(BaseModel):
     session_token: str | None = None
     org_id: str | None = None
     name: str | None = None
+
+
+class WorkspaceRenameRequest(BaseModel):
+    name: str
+
+
+class WorkspaceTokenUpdateRequest(BaseModel):
+    access_token: str
 
 
 class WorkspaceSyncRequest(BaseModel):

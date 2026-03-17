@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite, Member, Workspace
-from app.schemas import WorkspaceImportRequest
+from app.schemas import (
+    WorkspaceImportRequest,
+    WorkspaceRenameRequest,
+    WorkspaceTokenUpdateRequest,
+)
 from app.services.chatgpt import chatgpt_service
 from app.services.workspace_sync import (
     build_action_response,
@@ -249,6 +253,146 @@ async def sync_workspace(
         workspace,
         trigger="manual",
         publish_events=True,
+    )
+
+
+@router.patch("/api/workspaces/{id}/name")
+async def rename_workspace(
+    id: str,
+    payload: WorkspaceRenameRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    next_name = " ".join(payload.name.split()).strip()
+    if not next_name:
+        raise HTTPException(status_code=400, detail="workspace name is required")
+    if len(next_name) > 120:
+        raise HTTPException(status_code=400, detail="workspace name must be 120 characters or fewer")
+
+    access_token = workspace.access_token
+    session_token = workspace.session_token
+
+    if not access_token and not session_token:
+        raise HTTPException(
+            status_code=400,
+            detail="workspace does not have an access token or session token",
+        )
+
+    if not access_token and session_token:
+        try:
+            refreshed = await chatgpt_service.refresh_access_token(
+                session_token,
+                workspace.account_id or workspace.org_id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"failed to refresh access token: {exc}",
+            ) from exc
+        access_token = refreshed["access_token"]
+        workspace.access_token = access_token
+        workspace.session_token = refreshed.get("session_token") or session_token
+
+    try:
+        await chatgpt_service.rename_workspace(
+            access_token,
+            workspace.account_id or workspace.org_id,
+            next_name,
+        )
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to rename workspace upstream: {exc}",
+        ) from exc
+
+    workspace.name = next_name
+    workspace.status = "live"
+    workspace.sync_error = None
+    session.commit()
+    session.refresh(workspace)
+
+    return build_action_response(
+        action="workspace_rename",
+        workspace=workspace,
+        session=session,
+        refresh_hint=build_refresh_hint(
+            scope="workspace_list",
+            org_id=workspace.org_id,
+            reason="workspace_renamed",
+            include_details=False,
+        ),
+        extra={"name": workspace.name},
+    )
+
+
+@router.patch("/api/workspaces/{id}/token")
+async def update_workspace_token(
+    id: str,
+    payload: WorkspaceTokenUpdateRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    access_token = payload.access_token.strip()
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access token is required")
+
+    try:
+        accounts = await chatgpt_service.get_account_info(access_token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to validate access token: {exc}",
+        ) from exc
+
+    account_ids = {
+        str(account.get("account_id") or "")
+        for account in accounts
+        if str(account.get("account_id") or "")
+    }
+    expected_account_id = workspace.account_id or workspace.org_id
+    if account_ids and expected_account_id not in account_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="token does not belong to this workspace",
+        )
+
+    try:
+        chatgpt_service.decode_access_token_claims(access_token)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid access token: {exc}",
+        ) from exc
+
+    workspace.access_token = access_token
+    workspace.status = "live"
+    workspace.sync_error = None
+    session.commit()
+    session.refresh(workspace)
+
+    return build_action_response(
+        action="workspace_token_update",
+        workspace=workspace,
+        session=session,
+        refresh_hint=build_refresh_hint(
+            scope="workspace_list",
+            org_id=workspace.org_id,
+            reason="workspace_token_updated",
+            include_details=False,
+        ),
     )
 
 

@@ -220,12 +220,22 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def coerce_utc(value: datetime | None) -> datetime | None:
-    if value is None:
+def get_access_token_expiry(workspace: Workspace) -> datetime | None:
+    if not workspace.access_token:
         return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+
+    try:
+        return chatgpt_service.extract_access_token_expiry(workspace.access_token)
+    except (PyJWTError, ValueError, TypeError):
+        return None
+
+
+def coerce_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _step_index_from_reason(reason: str | None) -> int:
@@ -512,6 +522,9 @@ def workspace_to_dict(workspace: Workspace, session: Session) -> dict[str, Any]:
         "member_limit": workspace.member_limit,
         "pending_invites": pending_invites,
         "expires_at": serialize_datetime(workspace.expires_at),
+        "access_token_expires_at": serialize_datetime(
+            get_access_token_expiry(workspace)
+        ),
         "last_sync": serialize_datetime(workspace.last_sync),
         "created_at": serialize_datetime(workspace.created_at),
         "current_user_role": current_user_role,
@@ -660,6 +673,9 @@ def workspace_to_dict(
         "member_limit": workspace.member_limit,
         "pending_invites": resolved_pending_invites,
         "expires_at": serialize_datetime(workspace.expires_at),
+        "access_token_expires_at": serialize_datetime(
+            get_access_token_expiry(workspace)
+        ),
         "last_sync": serialize_datetime(workspace.last_sync),
         "created_at": serialize_datetime(workspace.created_at),
         "current_user_role": resolved_current_user_role,

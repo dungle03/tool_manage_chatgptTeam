@@ -12,10 +12,6 @@ export function DashboardSummary(props: {
   availableSlots: number;
   pendingInvites: number;
 }) {
-  // Health is temporarily hidden to keep the summary grid balanced.
-  // If we want to show it again later, restore both:
-  // 1) the syncErrors prop passed from page.tsx
-  // 2) the Health item inside the items array below
   const items = [
     {
       icon: <SummaryIcon path="M4 7h16M7 4v6m10-6v6M5 11h14a1 1 0 0 1 1 1v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a1 1 0 0 1 1-1Z" />,
@@ -42,23 +38,30 @@ export function DashboardSummary(props: {
       icon: <SummaryIcon path="M12 3l1.9 3.86L18 8.1l-3 2.93l.71 4.12L12 13.2l-3.71 1.95L9 11.03L6 8.1l4.1-.24L12 3Z" />,
       label: "Pending",
       value: props.pendingInvites,
-      meta: "Invites waiting response",
+      meta: "Invites awaiting reply",
       tone: "warning",
     },
   ];
 
   return (
-    <div className="stats-grid">
-      {items.map((item) => (
-        <div key={item.label} className={`stat-card stat-${item.tone}`}>
-          <div className="stat-topline">
-            <span className="stat-icon" aria-hidden="true">{item.icon}</span>
-            <span className="stat-label">{item.label}</span>
+    <section className="summary-strip" aria-label="Dashboard summary">
+      <div className="summary-strip-kicker-wrap">
+        <span className="summary-strip-kicker">Overview</span>
+      </div>
+      <div className="stats-grid">
+        {items.map((item) => (
+          <div key={item.label} className={`stat-card stat-${item.tone}`}>
+            <div className="stat-topline">
+              <span className="stat-icon" aria-hidden="true">{item.icon}</span>
+              <div className="stat-copy">
+                <span className="stat-label">{item.label}</span>
+                <span className="stat-meta">{item.meta}</span>
+              </div>
+            </div>
+            <div className="stat-value">{item.value}</div>
           </div>
-          <div className="stat-value">{item.value}</div>
-          <div className="stat-meta">{item.meta}</div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </section>
   );
 }
