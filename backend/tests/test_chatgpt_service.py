@@ -17,27 +17,35 @@ class _FakeAsyncSession:
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = 0
+        self.last_method = None
+        self.last_url = None
+        self.last_headers = None
+        self.last_json = None
+        self.last_cookies = None
+
+    def _record(self, method, url, headers=None, json=None, cookies=None):
+        self.calls += 1
+        self.last_method = method
+        self.last_url = url
+        self.last_headers = headers
+        self.last_json = json
+        self.last_cookies = cookies
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     async def get(self, url, headers=None, cookies=None):
-        self.calls += 1
-        response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
+        return self._record("GET", url, headers=headers, cookies=cookies)
 
     async def post(self, url, headers=None, json=None, cookies=None):
-        self.calls += 1
-        response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
+        return self._record("POST", url, headers=headers, json=json, cookies=cookies)
+
+    async def patch(self, url, headers=None, json=None, cookies=None):
+        return self._record("PATCH", url, headers=headers, json=json, cookies=cookies)
 
     async def delete(self, url, headers=None, json=None, cookies=None):
-        self.calls += 1
-        response = self._responses.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return response
+        return self._record("DELETE", url, headers=headers, json=json, cookies=cookies)
 
 
 
@@ -149,19 +157,29 @@ def test_request_retries_on_server_error(monkeypatch):
     assert fake_session.calls == 3
 
 
-def test_request_raises_for_unsupported_method(monkeypatch):
+def test_request_supports_patch(monkeypatch):
     service = ChatGPTService()
+    fake_session = _FakeAsyncSession([_FakeResponse(200, {"ok": True})])
 
     async def fake_get_session(identifier="default"):
-        raise AssertionError("_get_session should not be called for unsupported methods")
+        return fake_session
 
     monkeypatch.setattr(service, "_get_session", fake_get_session)
 
-    try:
-        asyncio.run(service._request("PATCH", "/accounts/check/v4-2023-04-27", headers={}))
-        raise AssertionError("Expected ValueError for unsupported method")
-    except ValueError as exc:
-        assert str(exc) == "Unsupported method: PATCH"
+    result = asyncio.run(
+        service._request(
+            "PATCH",
+            "/accounts/acc_123",
+            headers={"Content-Type": "application/json"},
+            json_data={"name": "CypherCore"},
+        )
+    )
+
+    assert result == {"success": True, "data": {"ok": True}}
+    assert fake_session.calls == 1
+    assert fake_session.last_method == "PATCH"
+    assert fake_session.last_url == "https://chatgpt.com/backend-api/accounts/acc_123"
+    assert fake_session.last_json == {"name": "CypherCore"}
 
 
 def test_request_returns_contextual_error_when_transport_fails(monkeypatch):

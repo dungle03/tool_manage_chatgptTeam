@@ -1,5 +1,30 @@
 # Changelog
 
+## [2026-03-20]
+
+### Changed
+- Compact workspace card hiển thị thêm dòng `Team expires on` bên dưới `Access token expires in ...`
+
+### Fixed
+- Sửa lỗi rename workspace/team bị 502 do backend shared request helper chưa hỗ trợ method `PATCH`
+- Cập nhật regression test ChatGPT service và fake async session helper để verify PATCH request đúng cách
+
+## [2026-03-18]
+
+### Added
+- Workspace token update flow với endpoint backend `PATCH /api/workspaces/{id}/token`
+- Dialog `update-token-dialog.tsx` để dán access token mới cho từng workspace
+- Nút action key trên cả `WorkspaceCard` và `CompactWorkspaceCard`
+
+### Changed
+- Dashboard mặc định mở ở mode 2 / compact view
+- Icon action update token được đổi sang chìa khóa màu vàng theo quyết định UI cuối cùng
+- Đồng bộ lại project memory trong `.brain/` sau khi hoàn tất feature và push sạch repo
+
+### Fixed
+- Hoàn thiện refresh UI sau khi cập nhật token để summary/workspace state được cập nhật ngay
+- Đồng bộ backend/frontend types cho mutation update token
+
 ## [2026-03-12]
 
 ### Added

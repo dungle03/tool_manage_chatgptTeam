@@ -89,6 +89,19 @@ function formatRemainingTime(timestamp?: string | null): string | null {
   return "soon";
 }
 
+function formatDisplayDate(timestamp?: string | null): string | null {
+  if (!timestamp) return null;
+
+  const target = new Date(timestamp);
+  if (Number.isNaN(target.getTime())) return null;
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(target);
+}
+
 function getTokenStatusCopy(
   accessTokenExpiresAt?: string | null,
   lastSync?: string | null,
@@ -124,7 +137,7 @@ function CompactWorkspaceCardComponent({
   members,
   memberLimit,
   pendingInvites = 0,
-  expiresAt: _expiresAt,
+  expiresAt,
   accessTokenExpiresAt,
   lastSync,
   syncing = false,
@@ -139,6 +152,7 @@ function CompactWorkspaceCardComponent({
   const safeMembers = Math.min(members, seatLimit);
   const statusText = status === "synced" ? "LIVE" : "ISSUE";
   const tokenStatusCopy = getTokenStatusCopy(accessTokenExpiresAt, lastSync);
+  const teamExpiryDate = formatDisplayDate(expiresAt);
 
   return (
     <article className={`compact-workspace-card compact-card-${status}`}>
@@ -255,6 +269,21 @@ function CompactWorkspaceCardComponent({
         <span className="compact-token-copy">{tokenStatusCopy.label}</span>
         <strong>{tokenStatusCopy.value}</strong>
       </div>
+
+      {teamExpiryDate ? (
+        <div className="compact-token-row compact-token-row-neutral">
+          <span className="compact-token-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3.5" y="4.5" width="13" height="12" rx="2.5" />
+              <path d="M6.5 3.5v3" />
+              <path d="M13.5 3.5v3" />
+              <path d="M3.5 8.5h13" />
+            </svg>
+          </span>
+          <span className="compact-token-copy">Team expires on</span>
+          <strong>{teamExpiryDate}</strong>
+        </div>
+      ) : null}
 
       <div className="compact-card-actions">
         <button

@@ -65,7 +65,7 @@ class ChatGPTService:
         cookies: dict[str, str] | None = None,
         use_base_url: bool = True,
     ) -> dict[str, Any]:
-        if method not in {"GET", "POST", "DELETE"}:
+        if method not in {"GET", "POST", "PATCH", "DELETE"}:
             raise ValueError(f"Unsupported method: {method}")
 
         session = await self._get_session()
@@ -80,6 +80,13 @@ class ChatGPTService:
                     )
                 elif method == "POST":
                     response = await session.post(
+                        url,
+                        headers=request_headers,
+                        json=json_data,
+                        cookies=cookies,
+                    )
+                elif method == "PATCH":
+                    response = await session.patch(
                         url,
                         headers=request_headers,
                         json=json_data,
