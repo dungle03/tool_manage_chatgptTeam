@@ -1,12 +1,16 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import verify_admin_token
 from app.db import get_session
-from app.models import Invite, Member, Workspace
+from app.models import Invite, Member, UnauthorizedFinding, Workspace
 from app.schemas import (
+    UnauthorizedFindingActionRequest,
     WorkspaceImportRequest,
+    WorkspacePolicyUpdateRequest,
     WorkspaceRenameRequest,
     WorkspaceTokenUpdateRequest,
 )
@@ -18,8 +22,10 @@ from app.services.workspace_sync import (
     build_workspace_list_payload,
     is_workspace_sync_in_progress,
     parse_datetime,
+    resolve_access_token,
     schedule_followup_sync,
     serialize_datetime,
+    serialize_unauthorized_finding_row,
     sync_workspace_data,
     workspace_to_dict,
 )
@@ -32,12 +38,38 @@ def _parse_datetime(value):
     return parse_datetime(value)
 
 
+def _normalize_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {"off", "warn_only", "auto_kick"}:
+        raise HTTPException(
+            status_code=400,
+            detail="unauthorized_member_mode must be one of: off, warn_only, auto_kick",
+        )
+    return normalized
+
+
+def _finding_by_id(
+    session: Session, org_id: str, finding_id: int
+) -> UnauthorizedFinding:
+    finding = session.execute(
+        select(UnauthorizedFinding).where(
+            UnauthorizedFinding.org_id == org_id,
+            UnauthorizedFinding.id == finding_id,
+        )
+    ).scalar_one_or_none()
+    if finding is None:
+        raise HTTPException(status_code=404, detail="unauthorized finding not found")
+    return finding
+
+
 @router.get("/api/workspaces")
 async def get_workspaces(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
-    rows = session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
+    rows = list(
+        session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
+    )
     return build_workspace_list_payload(rows, session)
 
 
@@ -67,8 +99,11 @@ async def import_team(
                 status_code=502,
                 detail=f"failed to refresh access token: {exc}",
             ) from exc
-        access_token = refreshed["access_token"]
+        access_token = str(refreshed["access_token"])
         session_token = refreshed.get("session_token") or session_token
+
+    if access_token is None:
+        raise HTTPException(status_code=400, detail="access token is required")
 
     try:
         accounts = await chatgpt_service.get_account_info(access_token)
@@ -104,9 +139,11 @@ async def import_team(
             select(Workspace).where(Workspace.org_id == account_id)
         ).scalar_one_or_none()
 
+        workspace_name = str(info.get("name") or account_id)
+
         if existing:
             existing.account_id = account_id
-            existing.name = info.get("name") or existing.name
+            existing.name = workspace_name
             existing.access_token = access_token
             existing.session_token = session_token
             existing.status = "live"
@@ -120,7 +157,7 @@ async def import_team(
             workspace = Workspace(
                 org_id=account_id,
                 account_id=account_id,
-                name=info.get("name") or account_id,
+                name=workspace_name,
                 access_token=access_token,
                 session_token=session_token,
                 status="live",
@@ -146,7 +183,7 @@ async def import_team(
         }
         for workspace in imported_workspaces
     ]
-    imported_org_ids = [item["org_id"] for item in imported]
+    imported_org_ids = [str(item["org_id"]) for item in imported]
     session.commit()
 
     schedule_warnings: list[dict[str, str]] = []
@@ -173,9 +210,11 @@ async def import_team(
                 }
             )
 
-    refreshed_workspaces = (
+    refreshed_workspaces = list(
         session.execute(
-            select(Workspace).where(Workspace.org_id.in_(imported_org_ids)).order_by(Workspace.org_id)
+            select(Workspace)
+            .where(Workspace.org_id.in_(imported_org_ids))
+            .order_by(Workspace.org_id)
         )
         .scalars()
         .all()
@@ -219,6 +258,60 @@ def get_workspace_members(
     ]
 
 
+@router.get("/api/unauthorized-findings")
+def get_all_unauthorized_findings(
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    """Return all unauthorized findings across all workspaces, enriched with workspace name."""
+    workspace_names: dict[str, str] = {}
+    for ws in session.execute(select(Workspace)).scalars().all():
+        workspace_names[ws.org_id] = ws.name
+
+    rows = (
+        session.execute(
+            select(UnauthorizedFinding).order_by(
+                UnauthorizedFinding.last_seen_at.desc(),
+                UnauthorizedFinding.id.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    results = []
+    for row in rows:
+        serialized = serialize_unauthorized_finding_row(row)
+        serialized["workspace_name"] = workspace_names.get(row.org_id, row.org_id)
+        results.append(serialized)
+    return results
+
+
+@router.get("/api/workspaces/{id}/unauthorized-members")
+def get_unauthorized_members(
+    id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    rows = (
+        session.execute(
+            select(UnauthorizedFinding)
+            .where(UnauthorizedFinding.org_id == id)
+            .order_by(
+                case(
+                    (UnauthorizedFinding.status == "detected", 0),
+                    (UnauthorizedFinding.status == "kick_failed", 1),
+                    else_=2,
+                ),
+                UnauthorizedFinding.last_seen_at.desc(),
+                UnauthorizedFinding.id.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [serialize_unauthorized_finding_row(row) for row in rows]
+
+
 @router.post("/api/workspaces/{id}/sync")
 async def sync_workspace(
     id: str,
@@ -256,6 +349,153 @@ async def sync_workspace(
     )
 
 
+@router.patch("/api/workspaces/{id}/unauthorized-policy")
+async def update_unauthorized_policy(
+    id: str,
+    payload: WorkspacePolicyUpdateRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    workspace.unauthorized_member_mode = _normalize_mode(
+        payload.unauthorized_member_mode
+    )
+    session.commit()
+    session.refresh(workspace)
+
+    return build_action_response(
+        action="workspace_policy_update",
+        workspace=workspace,
+        session=session,
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="workspace_policy_updated",
+            include_details=True,
+        ),
+        extra={"unauthorized_member_mode": workspace.unauthorized_member_mode},
+    )
+
+
+@router.post("/api/workspaces/{id}/unauthorized-members/{finding_id}/trust")
+async def trust_unauthorized_member(
+    id: str,
+    finding_id: int,
+    payload: UnauthorizedFindingActionRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    finding = _finding_by_id(session, id, finding_id)
+    now = datetime.now(timezone.utc)
+    finding.status = "trusted"
+    finding.action_reason = payload.reason or "manually_trusted"
+    finding.resolved_at = now
+    finding.updated_at = now
+    session.commit()
+    session.refresh(finding)
+    session.refresh(workspace)
+
+    return build_action_response(
+        action="unauthorized_member_trust",
+        workspace=workspace,
+        session=session,
+        updated_record=serialize_unauthorized_finding_row(finding),
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=id,
+            reason="unauthorized_member_trusted",
+            include_details=True,
+        ),
+        extra={"finding_id": finding.id, "status": finding.status},
+    )
+
+
+@router.post("/api/workspaces/{id}/unauthorized-members/{finding_id}/kick")
+async def kick_unauthorized_member(
+    id: str,
+    finding_id: int,
+    payload: UnauthorizedFindingActionRequest,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    finding = _finding_by_id(session, id, finding_id)
+    if not finding.remote_id:
+        raise HTTPException(
+            status_code=409, detail="unauthorized finding has no remote member id"
+        )
+    if finding.role.lower() == "owner":
+        raise HTTPException(status_code=409, detail="cannot remove owner")
+
+    access_token = await resolve_access_token(workspace)
+    account_id = workspace.account_id or workspace.org_id
+
+    try:
+        await chatgpt_service.delete_member(access_token, account_id, finding.remote_id)
+    except Exception as exc:
+        now = datetime.now(timezone.utc)
+        finding.status = "kick_failed"
+        finding.action_reason = str(exc)
+        finding.updated_at = now
+        finding.resolved_at = None
+        session.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"failed to remove unauthorized member upstream: {exc}",
+        ) from exc
+
+    local_member = session.execute(
+        select(Member).where(
+            Member.org_id == id,
+            Member.remote_id == finding.remote_id,
+        )
+    ).scalar_one_or_none()
+    if local_member is not None:
+        session.delete(local_member)
+        if workspace.member_count > 0:
+            workspace.member_count -= 1
+
+    now = datetime.now(timezone.utc)
+    finding.status = "kicked"
+    finding.action_reason = payload.reason or "manual_kick"
+    finding.resolved_at = now
+    finding.updated_at = now
+    schedule_followup_sync(session, workspace, reason="member_kicked")
+    session.commit()
+    session.refresh(finding)
+    session.refresh(workspace)
+
+    return build_action_response(
+        action="unauthorized_member_kick",
+        workspace=workspace,
+        session=session,
+        updated_record=serialize_unauthorized_finding_row(finding),
+        refresh_hint=build_refresh_hint(
+            scope="workspace_detail",
+            org_id=id,
+            reason="unauthorized_member_kicked",
+            include_details=True,
+        ),
+        extra={"finding_id": finding.id, "status": finding.status},
+    )
+
+
 @router.patch("/api/workspaces/{id}/name")
 async def rename_workspace(
     id: str,
@@ -273,7 +513,9 @@ async def rename_workspace(
     if not next_name:
         raise HTTPException(status_code=400, detail="workspace name is required")
     if len(next_name) > 120:
-        raise HTTPException(status_code=400, detail="workspace name must be 120 characters or fewer")
+        raise HTTPException(
+            status_code=400, detail="workspace name must be 120 characters or fewer"
+        )
 
     access_token = workspace.access_token
     session_token = workspace.session_token
@@ -298,6 +540,11 @@ async def rename_workspace(
         access_token = refreshed["access_token"]
         workspace.access_token = access_token
         workspace.session_token = refreshed.get("session_token") or session_token
+
+    if access_token is None:
+        raise HTTPException(
+            status_code=400, detail="workspace access token is required"
+        )
 
     try:
         await chatgpt_service.rename_workspace(
@@ -411,6 +658,9 @@ def delete_workspace(
     deleted_summary = workspace_to_dict(workspace, session)
     session.query(Member).where(Member.org_id == workspace.org_id).delete()
     session.query(Invite).where(Invite.org_id == workspace.org_id).delete()
+    session.query(UnauthorizedFinding).where(
+        UnauthorizedFinding.org_id == workspace.org_id
+    ).delete()
     session.delete(workspace)
     session.commit()
 

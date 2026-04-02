@@ -45,6 +45,23 @@ class InviteOut(BaseModel):
     created_at: datetime
 
 
+class UnauthorizedFindingOut(BaseModel):
+    id: int
+    org_id: str
+    remote_id: str | None = None
+    email: str
+    name: str
+    role: str
+    status: str
+    detection_reason: str
+    action_reason: str | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    resolved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class InviteRequest(BaseModel):
     org_id: str
     email: str
@@ -74,6 +91,14 @@ class WorkspaceTokenUpdateRequest(BaseModel):
 
 class WorkspaceSyncRequest(BaseModel):
     org_id: str
+
+
+class WorkspacePolicyUpdateRequest(BaseModel):
+    unauthorized_member_mode: str
+
+
+class UnauthorizedFindingActionRequest(BaseModel):
+    reason: str | None = None
 
 
 class CancelInviteRequest(BaseModel):

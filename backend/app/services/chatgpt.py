@@ -231,7 +231,12 @@ class ChatGPTService:
         return result["data"].get("items", [])
 
     async def send_invite(
-        self, access_token: str, account_id: str, email: str
+        self,
+        access_token: str,
+        account_id: str,
+        email: str,
+        *,
+        resend_emails: bool = True,
     ) -> dict[str, Any]:
         result = await self._request(
             "POST",
@@ -244,7 +249,7 @@ class ChatGPTService:
             json_data={
                 "email_addresses": [email],
                 "role": "standard-user",
-                "resend_emails": True,
+                "resend_emails": resend_emails,
             },
         )
         if not result["success"]:

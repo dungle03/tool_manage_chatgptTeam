@@ -1,3 +1,27 @@
+export type UnauthorizedMemberMode = "off" | "warn_only" | "auto_kick";
+export type UnauthorizedFindingStatus =
+  | "detected"
+  | "kicked"
+  | "kick_failed"
+  | "trusted";
+
+export type UnauthorizedFinding = {
+  id: number;
+  org_id: string;
+  remote_id: string | null;
+  email: string;
+  name: string;
+  role: string;
+  status: UnauthorizedFindingStatus;
+  detection_reason: string;
+  action_reason: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Workspace = {
   id: number;
   org_id: string;
@@ -7,6 +31,9 @@ export type Workspace = {
   member_count: number;
   member_limit: number;
   pending_invites?: number;
+  unauthorized_member_mode?: UnauthorizedMemberMode;
+  unauthorized_active_count?: number;
+  unauthorized_last_detected_at?: string | null;
   expires_at: string | null;
   access_token_expires_at?: string | null;
   last_sync: string | null;
@@ -44,6 +71,7 @@ export type WorkspaceEvent = {
   summary?: {
     member_count: number;
     pending_invites: number;
+    unauthorized_active_count?: number;
     status: string;
     last_sync: string | null;
   };
@@ -100,6 +128,11 @@ export type MemberMutationResult = MutationResult<Member> & {
   status?: string;
 };
 
+export type UnauthorizedFindingMutationResult = MutationResult<UnauthorizedFinding> & {
+  finding_id?: number;
+  status?: UnauthorizedFindingStatus;
+};
+
 export type WorkspaceImportResult = MutationResult<Workspace[]> & {
   imported: { id: number; org_id: string; name: string }[];
   updated_records?: Workspace[];
@@ -111,6 +144,8 @@ export type WorkspaceSyncResult = MutationResult<never> & {
   members_synced: number;
   invites_synced: number;
   last_sync: string | null;
+  unauthorized_detected?: number;
+  unauthorized_kicked?: number;
 };
 
 export type WorkspaceDeleteResult = MutationResult<never> & {
@@ -122,3 +157,7 @@ export type WorkspaceRenameResult = MutationResult<never> & {
 };
 
 export type WorkspaceTokenUpdateResult = MutationResult<never>;
+
+export type WorkspacePolicyUpdateResult = MutationResult<never> & {
+  unauthorized_member_mode: UnauthorizedMemberMode;
+};

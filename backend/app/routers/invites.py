@@ -56,12 +56,48 @@ async def invite_member(
 
     account_id = workspace.account_id or workspace.org_id
     access_token = await resolve_access_token(workspace)
+    normalized_email = payload.email.strip().lower()
+
+    existing_invite = (
+        session.execute(
+            select(Invite)
+            .where(
+                Invite.org_id == payload.org_id,
+                Invite.status == "pending",
+                Invite.email.ilike(normalized_email),
+            )
+            .order_by(Invite.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if existing_invite:
+        invite_payload = serialize_invite_row(existing_invite)
+        return build_action_response(
+            action="invite_create",
+            workspace=workspace,
+            session=session,
+            updated_record=invite_payload,
+            refresh_hint=build_refresh_hint(
+                scope="workspace_detail",
+                org_id=workspace.org_id,
+                reason="invite_already_pending",
+                include_details=True,
+            ),
+            extra={
+                "invite_id": invite_payload["invite_id"],
+                "role": payload.role,
+                "invite": invite_payload,
+                "already_pending": True,
+            },
+        )
 
     try:
         response = await chatgpt_service.send_invite(
             access_token,
             account_id,
-            payload.email,
+            normalized_email,
+            resend_emails=False,
         )
 
         remote_invite_id = response.get("id")
@@ -71,8 +107,10 @@ async def invite_member(
                 (
                     item
                     for item in invites
-                    if str(item.get("email", "")).strip().lower()
-                    == payload.email.strip().lower()
+                    if str(item.get("email") or item.get("email_address") or "")
+                    .strip()
+                    .lower()
+                    == normalized_email
                     and str(item.get("status", "pending")).strip().lower() == "pending"
                 ),
                 None,
@@ -86,8 +124,8 @@ async def invite_member(
 
     invite = Invite(
         org_id=payload.org_id,
-        email=payload.email,
-        invite_id=str(remote_invite_id or payload.email.strip().lower()),
+        email=normalized_email,
+        invite_id=str(remote_invite_id or normalized_email),
         status="pending",
         created_at=datetime.now(timezone.utc),
     )

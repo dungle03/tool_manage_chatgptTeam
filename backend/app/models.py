@@ -30,6 +30,10 @@ class Workspace(Base):
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sync_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     sync_priority: Mapped[int] = mapped_column(Integer, default=0)
+    unauthorized_member_mode: Mapped[str] = mapped_column(String, default="auto_kick")
+    unauthorized_last_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -64,5 +68,43 @@ class Invite(Base):
     invite_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     status: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class UnauthorizedFinding(Base):
+    __tablename__ = "unauthorized_findings"
+    __table_args__ = (
+        Index("ix_unauthorized_findings_org_id_status", "org_id", "status"),
+        Index("ix_unauthorized_findings_org_id_email", "org_id", "email"),
+        Index(
+            "ix_unauthorized_findings_org_id_remote_id",
+            "org_id",
+            "remote_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    org_id: Mapped[str] = mapped_column(String, index=True)
+    remote_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    role: Mapped[str] = mapped_column(String, default="user")
+    status: Mapped[str] = mapped_column(String, default="detected")
+    detection_reason: Mapped[str] = mapped_column(
+        String, default="missing_from_local_whitelist"
+    )
+    action_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

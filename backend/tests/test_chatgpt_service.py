@@ -48,18 +48,22 @@ class _FakeAsyncSession:
         return self._record("DELETE", url, headers=headers, json=json, cookies=cookies)
 
 
-
 def test_get_account_info_filters_team_accounts(monkeypatch):
     service = ChatGPTService()
 
-    async def fake_request(method, path, headers=None, json_data=None, cookies=None, use_base_url=True):
+    async def fake_request(
+        method, path, headers=None, json_data=None, cookies=None, use_base_url=True
+    ):
         return {
             "success": True,
             "data": {
                 "accounts": {
                     "acc_team": {
                         "account": {"name": "Team A", "plan_type": "team"},
-                        "entitlement": {"subscription_plan": "team_monthly", "expires_at": "2026-12-01"},
+                        "entitlement": {
+                            "subscription_plan": "team_monthly",
+                            "expires_at": "2026-12-01",
+                        },
                     },
                     "acc_plus": {
                         "account": {"name": "Plus", "plan_type": "plus"},
@@ -78,12 +82,13 @@ def test_get_account_info_filters_team_accounts(monkeypatch):
     assert accounts[0]["name"] == "Team A"
 
 
-
 def test_send_invite_sets_auth_and_account_headers(monkeypatch):
     service = ChatGPTService()
     captured = {}
 
-    async def fake_request(method, path, headers=None, json_data=None, cookies=None, use_base_url=True):
+    async def fake_request(
+        method, path, headers=None, json_data=None, cookies=None, use_base_url=True
+    ):
         captured["method"] = method
         captured["path"] = path
         captured["headers"] = headers
@@ -92,21 +97,30 @@ def test_send_invite_sets_auth_and_account_headers(monkeypatch):
 
     monkeypatch.setattr(service, "_request", fake_request)
 
-    asyncio.run(service.send_invite("at_123", "acc_123", "new@company.com"))
+    asyncio.run(
+        service.send_invite(
+            "at_123",
+            "acc_123",
+            "new@company.com",
+            resend_emails=False,
+        )
+    )
 
     assert captured["method"] == "POST"
     assert captured["path"] == "/accounts/acc_123/invites"
     assert captured["headers"]["Authorization"] == "Bearer at_123"
     assert captured["headers"]["chatgpt-account-id"] == "acc_123"
     assert captured["json_data"]["email_addresses"] == ["new@company.com"]
-
+    assert captured["json_data"]["resend_emails"] is False
 
 
 def test_refresh_access_token_uses_session_cookie(monkeypatch):
     service = ChatGPTService()
     captured = {}
 
-    async def fake_request(method, path, headers=None, json_data=None, cookies=None, use_base_url=True):
+    async def fake_request(
+        method, path, headers=None, json_data=None, cookies=None, use_base_url=True
+    ):
         captured["method"] = method
         captured["path"] = path
         captured["cookies"] = cookies
@@ -131,7 +145,6 @@ def test_refresh_access_token_uses_session_cookie(monkeypatch):
     assert refreshed["access_token"] == "new-access-token"
 
 
-
 def test_request_retries_on_server_error(monkeypatch):
     service = ChatGPTService()
     fake_session = _FakeAsyncSession(
@@ -151,7 +164,9 @@ def test_request_retries_on_server_error(monkeypatch):
     monkeypatch.setattr(service, "_get_session", fake_get_session)
     monkeypatch.setattr("app.services.chatgpt.asyncio.sleep", fake_sleep)
 
-    result = asyncio.run(service._request("GET", "/accounts/check/v4-2023-04-27", headers={}))
+    result = asyncio.run(
+        service._request("GET", "/accounts/check/v4-2023-04-27", headers={})
+    )
 
     assert result["success"] is True
     assert fake_session.calls == 3
@@ -201,7 +216,9 @@ def test_request_returns_contextual_error_when_transport_fails(monkeypatch):
     monkeypatch.setattr(service, "_get_session", fake_get_session)
     monkeypatch.setattr("app.services.chatgpt.asyncio.sleep", fake_sleep)
 
-    result = asyncio.run(service._request("GET", "/accounts/check/v4-2023-04-27", headers={}))
+    result = asyncio.run(
+        service._request("GET", "/accounts/check/v4-2023-04-27", headers={})
+    )
 
     assert result["success"] is False
     assert result["status_code"] == 0

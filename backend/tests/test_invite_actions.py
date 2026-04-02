@@ -8,7 +8,13 @@ def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
-    async def fake_send_invite(_self, _access_token, _account_id, _email):
+    captured_send = {}
+
+    async def fake_send_invite(
+        _self, _access_token, _account_id, _email, resend_emails=True
+    ):
+        captured_send["email"] = _email
+        captured_send["resend_emails"] = resend_emails
         return {"id": "inv_remote_resend"}
 
     captured_cancel = {}
@@ -43,6 +49,7 @@ def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
     assert resend_body["updated_summary"]["org_id"] == "org_001"
     assert resend_body["refresh_hint"]["reason"] == "invite_resend"
     assert resend_body["refresh_hint"]["include_details"] is True
+    assert captured_send == {"email": "pending@company.com", "resend_emails": True}
 
     invites_after_resend = client.get("/api/invites", params={"org_id": "org_001"})
     assert invites_after_resend.status_code == 200
@@ -82,8 +89,11 @@ def test_resend_invite_falls_back_to_email_when_invite_id_is_stale(
 
     captured_send = {}
 
-    async def fake_send_invite(_self, _access_token, _account_id, _email):
+    async def fake_send_invite(
+        _self, _access_token, _account_id, _email, resend_emails=True
+    ):
         captured_send["email"] = _email
+        captured_send["resend_emails"] = resend_emails
         return {"id": "inv_remote_resend"}
 
     monkeypatch.setattr(
@@ -107,7 +117,10 @@ def test_resend_invite_falls_back_to_email_when_invite_id_is_stale(
     resend_body = resend.json()
     assert resend_body["ok"] is True
     assert resend_body["updated_record"]["invite_id"] == "inv_seed_1"
-    assert captured_send == {"email": "pending@company.com"}
+    assert captured_send == {
+        "email": "pending@company.com",
+        "resend_emails": True,
+    }
 
 
 def test_delete_invite_prefers_id_and_falls_back_to_email(monkeypatch):

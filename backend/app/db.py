@@ -32,8 +32,36 @@ def _create_index_if_missing(
     conn.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({columns})"))
 
 
+def _create_unauthorized_findings_table_if_missing(conn: Connection, inspector) -> None:
+    if inspector.has_table("unauthorized_findings"):
+        return
+
+    conn.execute(
+        text(
+            """
+            CREATE TABLE unauthorized_findings (
+                id INTEGER NOT NULL PRIMARY KEY,
+                org_id VARCHAR NOT NULL,
+                remote_id VARCHAR,
+                email VARCHAR NOT NULL,
+                name VARCHAR NOT NULL DEFAULT '',
+                role VARCHAR NOT NULL DEFAULT 'user',
+                status VARCHAR NOT NULL DEFAULT 'detected',
+                detection_reason VARCHAR NOT NULL DEFAULT 'missing_from_local_whitelist',
+                action_reason TEXT,
+                first_seen_at DATETIME NOT NULL,
+                last_seen_at DATETIME NOT NULL,
+                resolved_at DATETIME,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+
+
 def _migrate_add_missing_columns() -> None:
-    """Add columns that were added in Phase 2 but may not exist in older DBs."""
+    """Add columns that were added in later phases but may not exist in older DBs."""
     inspector = inspect(engine)
     with engine.connect() as conn:
         # workspaces table migrations
@@ -55,6 +83,8 @@ def _migrate_add_missing_columns() -> None:
                 "last_activity_at": "DATETIME",
                 "sync_reason": "VARCHAR",
                 "sync_priority": "INTEGER DEFAULT 0",
+                "unauthorized_member_mode": "VARCHAR DEFAULT 'auto_kick'",
+                "unauthorized_last_detected_at": "DATETIME",
             }
             for col, col_type in new_cols.items():
                 if col not in existing:
@@ -86,6 +116,28 @@ def _migrate_add_missing_columns() -> None:
         if inspector.has_table("invites"):
             _create_index_if_missing(
                 conn, "invites", "ix_invites_org_id_invite_id", "org_id, invite_id"
+            )
+
+        _create_unauthorized_findings_table_if_missing(conn, inspector)
+        inspector = inspect(conn)
+        if inspector.has_table("unauthorized_findings"):
+            _create_index_if_missing(
+                conn,
+                "unauthorized_findings",
+                "ix_unauthorized_findings_org_id_status",
+                "org_id, status",
+            )
+            _create_index_if_missing(
+                conn,
+                "unauthorized_findings",
+                "ix_unauthorized_findings_org_id_email",
+                "org_id, email",
+            )
+            _create_index_if_missing(
+                conn,
+                "unauthorized_findings",
+                "ix_unauthorized_findings_org_id_remote_id",
+                "org_id, remote_id",
             )
 
         conn.commit()

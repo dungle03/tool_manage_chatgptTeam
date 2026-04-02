@@ -17,6 +17,7 @@ import {
   getWorkspaceMembers,
   invalidateApiCache,
   kickMember,
+  listAllUnauthorizedFindings,
   listInvites,
   parseWorkspaceEvent,
   syncWorkspace,
@@ -26,6 +27,7 @@ import {
   renameWorkspace,
   updateWorkspaceToken,
 } from "@/lib/api";
+import type { GlobalUnauthorizedFinding } from "@/lib/api";
 import {
   applyWorkspaceSummaryList,
   compareWorkspaceExpiry,
@@ -149,6 +151,8 @@ export default function DashboardPage() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [globalUnauthorizedFindings, setGlobalUnauthorizedFindings] = useState<GlobalUnauthorizedFinding[]>([]);
+  const [unauthorizedBannerDismissed, setUnauthorizedBannerDismissed] = useState(false);
 
   const inflightMemberLoads = useRef(new Map<string, Promise<void>>());
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -451,12 +455,28 @@ export default function DashboardPage() {
                 pending_invites:
                   event.summary?.pending_invites ?? workspace.pending_invites,
                 member_count: event.summary?.member_count ?? workspace.member_count,
+                unauthorized_active_count:
+                  event.summary?.unauthorized_active_count ?? workspace.unauthorized_active_count,
                 last_sync: event.summary?.last_sync ?? workspace.last_sync,
                 status: event.summary?.status ?? workspace.status,
               }
             : workspace
         )
       );
+
+      // Auto-refresh global unauthorized findings banner
+      if (event.summary?.unauthorized_active_count != null && event.summary.unauthorized_active_count > 0) {
+        void (async () => {
+          try {
+            const findings = await listAllUnauthorizedFindings({ forceFresh: true });
+            setGlobalUnauthorizedFindings(findings);
+            setUnauthorizedBannerDismissed(false);
+          } catch {
+            // silent
+          }
+        })();
+      }
+
       if (event.trigger !== "auto") {
         showToastRef.current?.(
           "Realtime sync hoàn tất",
@@ -532,6 +552,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void loadWorkspaces();
+    // Fetch global unauthorized findings for the banner
+    void (async () => {
+      try {
+        const findings = await listAllUnauthorizedFindings({ forceFresh: true });
+        setGlobalUnauthorizedFindings(findings);
+        setUnauthorizedBannerDismissed(false);
+      } catch {
+        // silent — banner is optional
+      }
+    })();
   }, [loadWorkspaces]);
 
   useEffect(() => {
@@ -902,7 +932,10 @@ export default function DashboardPage() {
     setFocusedWorkspaceId(workspace.org_id);
 
     const state = wsStatesRef.current[workspace.org_id] ?? DEFAULT_WS_STATE;
-    if (!state.loadedMembers && (Boolean(workspace.last_sync) || workspace.member_count > 0)) {
+    if (
+      !state.loadedMembers &&
+      (Boolean(workspace.last_sync) || workspace.member_count > 0)
+    ) {
       await loadMembers(workspace.org_id);
     }
   }
@@ -957,6 +990,75 @@ export default function DashboardPage() {
         availableSlots={availableSlots}
         pendingInvites={totalPending}
       />
+
+      {globalUnauthorizedFindings.length > 0 && !unauthorizedBannerDismissed && (
+        <div className="section-panel" style={{
+          marginBottom: 24,
+          border: "1px solid rgba(245,196,81,0.25)",
+          background: "rgba(245,196,81,0.06)",
+          borderRadius: 16,
+          padding: "18px 22px",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <h3 className="section-heading" style={{ color: "#f5c451", marginBottom: 8 }}>
+                ⚠️ Auto-Kick Report — {globalUnauthorizedFindings.length} unauthorized member{globalUnauthorizedFindings.length > 1 ? "s" : ""} detected
+              </h3>
+              <p className="section-description" style={{ marginBottom: 12 }}>
+                Các thành viên dưới đây được phát hiện không có trong local database (whitelist) và đã được xử lý tự động.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-compact"
+              onClick={() => setUnauthorizedBannerDismissed(true)}
+              style={{ flexShrink: 0 }}
+            >
+              Dismiss
+            </button>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {globalUnauthorizedFindings.map((finding) => (
+              <div
+                key={finding.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  padding: "8px 12px",
+                  background: "rgba(255,255,255,0.03)",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  fontSize: 13,
+                }}
+              >
+                <span style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: finding.status === "kicked" ? "#4ade80" : finding.status === "kick_failed" ? "#ff6b6b" : "#f5c451",
+                  flexShrink: 0,
+                }} />
+                <strong style={{ minWidth: 160 }}>{finding.email}</strong>
+                <span className="workspace-helper-copy">→ team <strong>{finding.workspace_name}</strong></span>
+                <span className="workspace-helper-copy">
+                  Detected: {new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(finding.first_seen_at))}
+                </span>
+                {finding.resolved_at && (
+                  <span className="workspace-helper-copy">
+                    Kicked: {new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(finding.resolved_at))}
+                  </span>
+                )}
+                <span className={`workspace-badge badge-${finding.status === "kicked" ? "synced" : finding.status === "kick_failed" ? "error" : "warning"}`} style={{ marginLeft: "auto" }}>
+                  {finding.status === "kicked" ? "Kicked" : finding.status === "kick_failed" ? "Kick failed" : finding.status === "trusted" ? "Trusted" : "Detected"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="loading-state">
@@ -1027,11 +1129,11 @@ export default function DashboardPage() {
           {sortedWorkspaces.map((ws) => {
             const state = wsStates[ws.org_id] ?? DEFAULT_WS_STATE;
             const wsStatus =
-              ws.status === "live"
-                ? "synced"
-                : ws.status === "error"
-                  ? "error"
-                  : "warning";
+              ws.status === "error"
+                ? "error"
+                : ws.pending_invites && ws.pending_invites > 0
+                  ? "warning"
+                  : "synced";
 
             return (
               <WorkspaceCard

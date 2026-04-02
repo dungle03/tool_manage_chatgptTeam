@@ -3,13 +3,17 @@ import type {
   InviteMutationResult,
   Member,
   MemberMutationResult,
+  UnauthorizedFinding,
+  UnauthorizedFindingMutationResult,
   Workspace,
   WorkspaceDeleteResult,
   WorkspaceEvent,
   WorkspaceImportResult,
+  WorkspacePolicyUpdateResult,
   WorkspaceRenameResult,
   WorkspaceSyncResult,
   WorkspaceTokenUpdateResult,
+  UnauthorizedMemberMode,
 } from "@/types/api";
 
 // Lấy admin token từ env (nếu có), dev mode không cần
@@ -35,8 +39,60 @@ export async function getWorkspaceMembers(
   return requestJson(`/api/workspaces/${orgId}/members`, "GET", undefined, options);
 }
 
+export async function listUnauthorizedFindings(
+  orgId: string,
+  options?: { forceFresh?: boolean },
+): Promise<UnauthorizedFinding[]> {
+  return requestJson(`/api/workspaces/${orgId}/unauthorized-members`, "GET", undefined, options);
+}
+
+export type GlobalUnauthorizedFinding = UnauthorizedFinding & {
+  workspace_name: string;
+};
+
+export async function listAllUnauthorizedFindings(
+  options?: { forceFresh?: boolean },
+): Promise<GlobalUnauthorizedFinding[]> {
+  return requestJson("/api/unauthorized-findings", "GET", undefined, options);
+}
+
 export async function syncWorkspace(orgId: string): Promise<WorkspaceSyncResult> {
   return requestJson<WorkspaceSyncResult>(`/api/workspaces/${orgId}/sync`, "POST");
+}
+
+export async function updateWorkspaceUnauthorizedMode(
+  orgId: string,
+  mode: UnauthorizedMemberMode,
+): Promise<WorkspacePolicyUpdateResult> {
+  return requestJson<WorkspacePolicyUpdateResult>(
+    `/api/workspaces/${orgId}/unauthorized-policy`,
+    "PATCH",
+    { unauthorized_member_mode: mode },
+  );
+}
+
+export async function trustUnauthorizedFinding(
+  orgId: string,
+  findingId: number,
+  reason?: string,
+): Promise<UnauthorizedFindingMutationResult> {
+  return requestJson<UnauthorizedFindingMutationResult>(
+    `/api/workspaces/${orgId}/unauthorized-members/${findingId}/trust`,
+    "POST",
+    { reason },
+  );
+}
+
+export async function kickUnauthorizedFinding(
+  orgId: string,
+  findingId: number,
+  reason?: string,
+): Promise<UnauthorizedFindingMutationResult> {
+  return requestJson<UnauthorizedFindingMutationResult>(
+    `/api/workspaces/${orgId}/unauthorized-members/${findingId}/kick`,
+    "POST",
+    { reason },
+  );
 }
 
 export async function importTeam(payload: {

@@ -9,7 +9,7 @@ from jwt import PyJWTError
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Invite, Member, Workspace
+from app.models import Invite, Member, UnauthorizedFinding, Workspace
 from app.services.chatgpt import chatgpt_service
 from app.services.events import workspace_event_broker
 
@@ -52,7 +52,6 @@ SYNC_ERROR_RETRY_STEPS = _parse_step_list(
     os.getenv("SYNC_ERROR_RETRY_STEPS", "10,30,60"),
     [10, 30, 60],
 )
-
 
 
 def _get_workspace_lock(org_id: str) -> asyncio.Lock:
@@ -109,6 +108,166 @@ def serialize_member_row(member: Member) -> dict[str, Any]:
     }
 
 
+def serialize_unauthorized_finding_row(finding: UnauthorizedFinding) -> dict[str, Any]:
+    return {
+        "id": finding.id,
+        "org_id": finding.org_id,
+        "remote_id": finding.remote_id,
+        "email": finding.email,
+        "name": finding.name,
+        "role": finding.role,
+        "status": finding.status,
+        "detection_reason": finding.detection_reason,
+        "action_reason": finding.action_reason,
+        "first_seen_at": serialize_datetime(finding.first_seen_at),
+        "last_seen_at": serialize_datetime(finding.last_seen_at),
+        "resolved_at": serialize_datetime(finding.resolved_at),
+        "created_at": serialize_datetime(finding.created_at),
+        "updated_at": serialize_datetime(finding.updated_at),
+    }
+
+
+def _active_unauthorized_statuses() -> tuple[str, ...]:
+    return ("detected", "kick_failed")
+
+
+def _build_unauthorized_count_map(
+    session: Session,
+    org_ids: list[str],
+) -> dict[str, int]:
+    if not org_ids:
+        return {}
+
+    rows = session.execute(
+        select(UnauthorizedFinding.org_id, func.count().label("active_count"))
+        .where(
+            UnauthorizedFinding.org_id.in_(org_ids),
+            UnauthorizedFinding.status.in_(_active_unauthorized_statuses()),
+        )
+        .group_by(UnauthorizedFinding.org_id)
+    ).all()
+    return {str(org_id): int(active_count or 0) for org_id, active_count in rows}
+
+
+def _active_unauthorized_count(session: Session, org_id: str) -> int:
+    return int(
+        session.execute(
+            select(func.count())
+            .select_from(UnauthorizedFinding)
+            .where(
+                UnauthorizedFinding.org_id == org_id,
+                UnauthorizedFinding.status.in_(_active_unauthorized_statuses()),
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+def _normalize_remote_member(item: dict[str, Any]) -> dict[str, Any]:
+    created_raw = (
+        item.get("created_time") or item.get("created_at") or item.get("created")
+    )
+    return {
+        "remote_id": str(item.get("id") or "") or None,
+        "email": item.get("email") or "",
+        "name": item.get("name") or "",
+        "role": normalize_member_role(item),
+        "status": item.get("status") or "active",
+        "created_at": parse_datetime(created_raw),
+        "picture": item.get("picture"),
+    }
+
+
+def _upsert_unauthorized_finding(
+    session: Session,
+    *,
+    workspace: Workspace,
+    member: dict[str, Any],
+    detected_at: datetime,
+) -> UnauthorizedFinding:
+    normalized_email = normalize_identity(member.get("email")) or ""
+    remote_id = member.get("remote_id")
+
+    existing = None
+    if remote_id:
+        existing = session.execute(
+            select(UnauthorizedFinding).where(
+                UnauthorizedFinding.org_id == workspace.org_id,
+                UnauthorizedFinding.remote_id == remote_id,
+            )
+        ).scalar_one_or_none()
+    if existing is None and normalized_email:
+        existing = session.execute(
+            select(UnauthorizedFinding).where(
+                UnauthorizedFinding.org_id == workspace.org_id,
+                func.lower(UnauthorizedFinding.email) == normalized_email,
+            )
+        ).scalar_one_or_none()
+
+    if existing is None:
+        existing = UnauthorizedFinding(
+            org_id=workspace.org_id,
+            remote_id=remote_id,
+            email=member.get("email") or "",
+            name=member.get("name") or "",
+            role=member.get("role") or "user",
+            status="detected",
+            detection_reason="missing_from_local_whitelist",
+            first_seen_at=detected_at,
+            last_seen_at=detected_at,
+            created_at=detected_at,
+            updated_at=detected_at,
+        )
+        session.add(existing)
+        session.flush()
+        return existing
+
+    existing.remote_id = remote_id or existing.remote_id
+    existing.email = member.get("email") or existing.email
+    existing.name = member.get("name") or existing.name
+    existing.role = member.get("role") or existing.role
+    existing.last_seen_at = detected_at
+    existing.updated_at = detected_at
+    existing.resolved_at = None
+    if existing.status not in {"trusted", "kicked"}:
+        existing.status = "detected"
+        existing.action_reason = None
+    return existing
+
+
+def _mark_missing_findings_resolved(
+    session: Session,
+    *,
+    workspace: Workspace,
+    active_remote_keys: set[tuple[str | None, str | None]],
+    resolved_at: datetime,
+) -> None:
+    findings = (
+        session.execute(
+            select(UnauthorizedFinding).where(
+                UnauthorizedFinding.org_id == workspace.org_id
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for finding in findings:
+        finding_key = (
+            normalize_identity(finding.remote_id),
+            normalize_identity(finding.email),
+        )
+        if finding_key in active_remote_keys:
+            continue
+        if finding.status in _active_unauthorized_statuses():
+            finding.resolved_at = resolved_at
+            finding.updated_at = resolved_at
+            if finding.status == "detected":
+                finding.status = "trusted"
+                finding.action_reason = (
+                    finding.action_reason or "member_no_longer_present"
+                )
+
+
 def build_action_response(
     *,
     action: str,
@@ -157,7 +316,9 @@ def _persist_sync_failure(
     return managed_workspace
 
 
-def build_sync_in_progress_payload(workspace: Workspace, session: Session) -> dict[str, Any]:
+def build_sync_in_progress_payload(
+    workspace: Workspace, session: Session
+) -> dict[str, Any]:
     return {
         "ok": True,
         "action": "sync_workspace",
@@ -247,7 +408,9 @@ def _step_index_from_reason(reason: str | None) -> int:
         return -1
 
 
-def _priority_for_workspace(workspace: Workspace, pending_invites: int, now: datetime) -> int:
+def _priority_for_workspace(
+    workspace: Workspace, pending_invites: int, now: datetime
+) -> int:
     hot_until = coerce_utc(workspace.hot_until)
     if workspace.status == "error":
         return 80
@@ -259,13 +422,14 @@ def _priority_for_workspace(workspace: Workspace, pending_invites: int, now: dat
 
 
 def _publish_schedule_event(workspace: Workspace, pending_invites: int) -> None:
+    hot_until = coerce_utc(workspace.hot_until)
     workspace_event_broker.publish(
         "workspace_scheduled",
         org_id=workspace.org_id,
         reason=workspace.sync_reason,
         next_sync_at=serialize_datetime(workspace.next_sync_at),
         hot_until=serialize_datetime(workspace.hot_until),
-        is_hot=bool(coerce_utc(workspace.hot_until) and coerce_utc(workspace.hot_until) > utc_now()),
+        is_hot=bool(hot_until is not None and hot_until > utc_now()),
         pending_invites=pending_invites,
         priority=workspace.sync_priority,
     )
@@ -288,13 +452,17 @@ def schedule_followup_sync(
         else SYNC_HOT_WINDOW_SECONDS
     )
     hot_until = now + timedelta(seconds=max(0, effective_hot_window))
-    effective_delay = delay_seconds if delay_seconds is not None else SYNC_FOLLOWUP_STEPS[0]
+    effective_delay = (
+        delay_seconds if delay_seconds is not None else SYNC_FOLLOWUP_STEPS[0]
+    )
     next_sync_at = now + timedelta(seconds=max(0, effective_delay))
 
     current_hot_until = coerce_utc(workspace.hot_until)
     current_next_sync_at = coerce_utc(workspace.next_sync_at)
     workspace.last_activity_at = now
-    workspace.hot_until = max(current_hot_until, hot_until) if current_hot_until else hot_until
+    workspace.hot_until = (
+        max(current_hot_until, hot_until) if current_hot_until else hot_until
+    )
     workspace.next_sync_at = (
         min(current_next_sync_at, next_sync_at)
         if current_next_sync_at is not None
@@ -307,7 +475,6 @@ def schedule_followup_sync(
         _publish_schedule_event(workspace, pending_invites)
 
 
-
 def _set_baseline_schedule(
     workspace: Workspace,
     *,
@@ -318,7 +485,6 @@ def _set_baseline_schedule(
     workspace.next_sync_at = now + timedelta(minutes=SYNC_BASELINE_MINUTES)
     workspace.sync_reason = "baseline_refresh"
     workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
-
 
 
 def _schedule_next_sync_after_success(
@@ -362,7 +528,6 @@ def _schedule_next_sync_after_success(
     )
 
 
-
 def _schedule_retry_after_failure(
     session: Session,
     workspace: Workspace,
@@ -375,7 +540,6 @@ def _schedule_retry_after_failure(
         delay_seconds=retry_delay,
         publish_event=False,
     )
-
 
 
 def normalize_member_role(item: dict[str, Any]) -> str:
@@ -490,11 +654,12 @@ async def resolve_access_token(workspace: Workspace) -> str:
                 workspace.session_token,
                 account_id,
             )
-            workspace.access_token = refreshed["access_token"]
+            refreshed_access_token = str(refreshed["access_token"])
+            workspace.access_token = refreshed_access_token
             workspace.session_token = (
                 refreshed.get("session_token") or workspace.session_token
             )
-            return workspace.access_token
+            return refreshed_access_token
         except RuntimeError:
             if workspace.access_token:
                 return workspace.access_token
@@ -503,12 +668,32 @@ async def resolve_access_token(workspace: Workspace) -> str:
     if workspace.access_token:
         return workspace.access_token
 
-    raise HTTPException(status_code=400, detail="workspace missing access/session token")
+    raise HTTPException(
+        status_code=400, detail="workspace missing access/session token"
+    )
 
 
-def workspace_to_dict(workspace: Workspace, session: Session) -> dict[str, Any]:
-    current_user_role = get_current_user_role(workspace, session)
-    pending_invites = _pending_invite_count(session, workspace.org_id)
+def workspace_to_dict(
+    workspace: Workspace,
+    session: Session,
+    *,
+    current_user_role: str | None = None,
+    pending_invites: int | None = None,
+    unauthorized_active_count: int | None = None,
+) -> dict[str, Any]:
+    resolved_current_user_role = current_user_role or get_current_user_role(
+        workspace, session
+    )
+    resolved_pending_invites = (
+        pending_invites
+        if pending_invites is not None
+        else _pending_invite_count(session, workspace.org_id)
+    )
+    resolved_unauthorized_count = (
+        unauthorized_active_count
+        if unauthorized_active_count is not None
+        else _active_unauthorized_count(session, workspace.org_id)
+    )
     now = utc_now()
     hot_until = coerce_utc(workspace.hot_until)
     is_hot = bool(hot_until and hot_until > now)
@@ -520,15 +705,20 @@ def workspace_to_dict(workspace: Workspace, session: Session) -> dict[str, Any]:
         "status": workspace.status,
         "member_count": workspace.member_count,
         "member_limit": workspace.member_limit,
-        "pending_invites": pending_invites,
+        "pending_invites": resolved_pending_invites,
+        "unauthorized_member_mode": workspace.unauthorized_member_mode,
+        "unauthorized_active_count": resolved_unauthorized_count,
+        "unauthorized_last_detected_at": serialize_datetime(
+            workspace.unauthorized_last_detected_at
+        ),
         "expires_at": serialize_datetime(workspace.expires_at),
         "access_token_expires_at": serialize_datetime(
             get_access_token_expiry(workspace)
         ),
         "last_sync": serialize_datetime(workspace.last_sync),
         "created_at": serialize_datetime(workspace.created_at),
-        "current_user_role": current_user_role,
-        "can_manage_members": current_user_role in ("owner", "admin"),
+        "current_user_role": resolved_current_user_role,
+        "can_manage_members": resolved_current_user_role in ("owner", "admin"),
         "sync_error": workspace.sync_error,
         "sync_started_at": serialize_datetime(workspace.sync_started_at),
         "sync_finished_at": serialize_datetime(workspace.sync_finished_at),
@@ -619,7 +809,11 @@ def _build_current_user_role_map(
     if candidate_emails:
         identity_filters.append(func.lower(Member.email).in_(candidate_emails))
     if identity_filters:
-        member_filters.append(identity_filters[0] if len(identity_filters) == 1 else identity_filters[0] | identity_filters[1])
+        member_filters.append(
+            identity_filters[0]
+            if len(identity_filters) == 1
+            else identity_filters[0] | identity_filters[1]
+        )
 
     members = session.execute(select(Member).where(*member_filters)).scalars().all()
 
@@ -653,12 +847,20 @@ def workspace_to_dict(
     *,
     current_user_role: str | None = None,
     pending_invites: int | None = None,
+    unauthorized_active_count: int | None = None,
 ) -> dict[str, Any]:
-    resolved_current_user_role = current_user_role or get_current_user_role(workspace, session)
+    resolved_current_user_role = current_user_role or get_current_user_role(
+        workspace, session
+    )
     resolved_pending_invites = (
         pending_invites
         if pending_invites is not None
         else _pending_invite_count(session, workspace.org_id)
+    )
+    resolved_unauthorized_count = (
+        unauthorized_active_count
+        if unauthorized_active_count is not None
+        else _active_unauthorized_count(session, workspace.org_id)
     )
     now = utc_now()
     hot_until = coerce_utc(workspace.hot_until)
@@ -672,6 +874,11 @@ def workspace_to_dict(
         "member_count": workspace.member_count,
         "member_limit": workspace.member_limit,
         "pending_invites": resolved_pending_invites,
+        "unauthorized_member_mode": workspace.unauthorized_member_mode,
+        "unauthorized_active_count": resolved_unauthorized_count,
+        "unauthorized_last_detected_at": serialize_datetime(
+            workspace.unauthorized_last_detected_at
+        ),
         "expires_at": serialize_datetime(workspace.expires_at),
         "access_token_expires_at": serialize_datetime(
             get_access_token_expiry(workspace)
@@ -696,16 +903,17 @@ def build_workspace_list_payload(
     workspaces: list[Workspace],
     session: Session,
 ) -> list[dict[str, Any]]:
-    pending_counts = _build_pending_invite_count_map(
-        session, [workspace.org_id for workspace in workspaces]
-    )
+    org_ids = [workspace.org_id for workspace in workspaces]
+    pending_counts = _build_pending_invite_count_map(session, org_ids)
     role_map = _build_current_user_role_map(workspaces, session)
+    unauthorized_counts = _build_unauthorized_count_map(session, org_ids)
     return [
         workspace_to_dict(
             workspace,
             session,
             current_user_role=role_map.get(workspace.org_id, "user"),
             pending_invites=pending_counts.get(workspace.org_id, 0),
+            unauthorized_active_count=unauthorized_counts.get(workspace.org_id, 0),
         )
         for workspace in workspaces
     ]
@@ -720,7 +928,9 @@ async def sync_workspace_data(
 ) -> dict[str, Any]:
     lock = _get_workspace_lock(workspace.org_id)
     if lock.locked():
-        raise HTTPException(status_code=409, detail="workspace sync already in progress")
+        raise HTTPException(
+            status_code=409, detail="workspace sync already in progress"
+        )
 
     async with lock:
         workspace_id = workspace.id
@@ -751,17 +961,90 @@ async def sync_workspace_data(
                 chatgpt_service.get_invites(access_token, account_id),
             )
 
+            existing_local_members = (
+                session.execute(select(Member).where(Member.org_id == workspace.org_id))
+                .scalars()
+                .all()
+            )
+            whitelisted_remote_ids = {
+                normalize_identity(member.remote_id)
+                for member in existing_local_members
+                if normalize_identity(member.remote_id)
+            }
+            whitelisted_emails = {
+                normalize_identity(member.email)
+                for member in existing_local_members
+                if normalize_identity(member.email)
+            }
+
+            normalized_remote_members = [
+                _normalize_remote_member(item) for item in remote_members
+            ]
+            unauthorized_members: list[dict[str, Any]] = []
+            active_remote_keys: set[tuple[str | None, str | None]] = set()
+            detected_at = utc_now()
+
+            for member in normalized_remote_members:
+                remote_id_key = normalize_identity(member.get("remote_id"))
+                email_key = normalize_identity(member.get("email"))
+                active_remote_keys.add((remote_id_key, email_key))
+                is_whitelisted = False
+                if remote_id_key and remote_id_key in whitelisted_remote_ids:
+                    is_whitelisted = True
+                elif email_key and email_key in whitelisted_emails:
+                    is_whitelisted = True
+
+                if not is_whitelisted:
+                    unauthorized_members.append(member)
+                    finding = _upsert_unauthorized_finding(
+                        session,
+                        workspace=workspace,
+                        member=member,
+                        detected_at=detected_at,
+                    )
+                    if workspace.unauthorized_member_mode == "auto_kick":
+                        remote_id = member.get("remote_id")
+                        if remote_id and member.get("role") != "owner":
+                            try:
+                                await chatgpt_service.delete_member(
+                                    access_token,
+                                    account_id,
+                                    remote_id,
+                                )
+                                finding.status = "kicked"
+                                finding.action_reason = "auto_kick_sync_enforcement"
+                                finding.resolved_at = detected_at
+                            except Exception as exc:
+                                finding.status = "kick_failed"
+                                finding.action_reason = str(exc)
+                                finding.resolved_at = None
+                        else:
+                            finding.status = "kick_failed"
+                            finding.action_reason = "remote_id_missing_or_owner"
+                            finding.resolved_at = None
+                        finding.updated_at = detected_at
+
+            if unauthorized_members:
+                workspace.unauthorized_last_detected_at = detected_at
+
+            _mark_missing_findings_resolved(
+                session,
+                workspace=workspace,
+                active_remote_keys=active_remote_keys,
+                resolved_at=detected_at,
+            )
+
             session.query(Member).where(Member.org_id == workspace.org_id).delete()
 
             existing_invites = (
-                session.execute(
-                    select(Invite).where(Invite.org_id == workspace.org_id)
-                )
+                session.execute(select(Invite).where(Invite.org_id == workspace.org_id))
                 .scalars()
                 .all()
             )
             invites_by_id = {
-                invite.invite_id: invite for invite in existing_invites if invite.invite_id
+                invite.invite_id: invite
+                for invite in existing_invites
+                if invite.invite_id
             }
             invites_by_email = {
                 invite.email.strip().lower(): invite
@@ -772,30 +1055,22 @@ async def sync_workspace_data(
 
             synced_member_emails: set[str] = set()
 
-            for item in remote_members:
-                created_raw = (
-                    item.get("created_time")
-                    or item.get("created_at")
-                    or item.get("created")
-                )
-                created = parse_datetime(created_raw)
-                role = normalize_member_role(item)
-                member_email = item.get("email") or ""
-                normalized_member_email = member_email.strip().lower()
+            for member in normalized_remote_members:
+                normalized_member_email = (member.get("email") or "").strip().lower()
                 if normalized_member_email:
                     synced_member_emails.add(normalized_member_email)
 
                 session.add(
                     Member(
                         org_id=workspace.org_id,
-                        remote_id=str(item.get("id") or "") or None,
-                        email=member_email,
-                        name=item.get("name") or "",
-                        role=role,
-                        status=item.get("status") or "active",
-                        invite_date=created,
-                        created_at=created,
-                        picture=item.get("picture"),
+                        remote_id=member.get("remote_id"),
+                        email=member.get("email") or "",
+                        name=member.get("name") or "",
+                        role=member.get("role") or "user",
+                        status=member.get("status") or "active",
+                        invite_date=member.get("created_at"),
+                        created_at=member.get("created_at"),
+                        picture=member.get("picture"),
                     )
                 )
 
@@ -807,7 +1082,9 @@ async def sync_workspace_data(
                 )
                 email = item.get("email") or item.get("email_address") or ""
                 normalized_email = email.strip().lower()
-                created_at = parse_datetime(item.get("created_at") or item.get("created"))
+                created_at = parse_datetime(
+                    item.get("created_at") or item.get("created")
+                )
                 existing_invite = invites_by_id.get(invite_id)
                 if existing_invite is None and normalized_email:
                     existing_invite = invites_by_email.get(normalized_email)
@@ -816,7 +1093,9 @@ async def sync_workspace_data(
                     existing_invite.email = email
                     existing_invite.invite_id = invite_id
                     existing_invite.status = item.get("status") or "pending"
-                    existing_invite.created_at = created_at or existing_invite.created_at
+                    existing_invite.created_at = (
+                        created_at or existing_invite.created_at
+                    )
                     seen_invite_row_ids.add(existing_invite.id)
                 else:
                     invite = Invite(
@@ -831,8 +1110,13 @@ async def sync_workspace_data(
                     seen_invite_row_ids.add(invite.id)
 
             for existing_invite in existing_invites:
-                normalized_existing_email = (existing_invite.email or "").strip().lower()
-                if normalized_existing_email and normalized_existing_email in synced_member_emails:
+                normalized_existing_email = (
+                    (existing_invite.email or "").strip().lower()
+                )
+                if (
+                    normalized_existing_email
+                    and normalized_existing_email in synced_member_emails
+                ):
                     session.delete(existing_invite)
                     continue
                 if existing_invite.id in seen_invite_row_ids:
@@ -847,6 +1131,28 @@ async def sync_workspace_data(
             workspace.status = "live"
             workspace.sync_error = None
             pending_invites = _pending_invite_count(session, workspace.org_id)
+            unauthorized_active_count = _active_unauthorized_count(
+                session, workspace.org_id
+            )
+            unauthorized_kicked = len(
+                [
+                    member
+                    for member in unauthorized_members
+                    if workspace.unauthorized_member_mode == "auto_kick"
+                ]
+            ) - int(
+                session.execute(
+                    select(func.count())
+                    .select_from(UnauthorizedFinding)
+                    .where(
+                        UnauthorizedFinding.org_id == workspace.org_id,
+                        UnauthorizedFinding.last_seen_at == detected_at,
+                        UnauthorizedFinding.status == "kick_failed",
+                    )
+                ).scalar_one()
+                or 0
+            )
+            unauthorized_kicked = max(unauthorized_kicked, 0)
             _schedule_next_sync_after_success(
                 session,
                 workspace,
@@ -860,6 +1166,20 @@ async def sync_workspace_data(
                 "members_synced": len(remote_members),
                 "invites_synced": len(remote_invites),
                 "last_sync": serialize_datetime(workspace.last_sync),
+                "unauthorized_detected": len(unauthorized_members),
+                "unauthorized_kicked": unauthorized_kicked,
+                "updated_summary": workspace_to_dict(
+                    workspace,
+                    session,
+                    pending_invites=pending_invites,
+                    unauthorized_active_count=unauthorized_active_count,
+                ),
+                "refresh_hint": build_refresh_hint(
+                    scope="workspace_detail",
+                    org_id=workspace.org_id,
+                    reason="workspace_synced",
+                    include_details=True,
+                ),
             }
             if publish_events:
                 workspace_event_broker.publish(
@@ -869,6 +1189,7 @@ async def sync_workspace_data(
                     summary={
                         "member_count": workspace.member_count,
                         "pending_invites": pending_invites,
+                        "unauthorized_active_count": unauthorized_active_count,
                         "status": workspace.status,
                         "last_sync": payload["last_sync"],
                     },
@@ -876,10 +1197,12 @@ async def sync_workspace_data(
                 _publish_schedule_event(workspace, pending_invites)
             return payload
         except HTTPException as exc:
-            workspace = _persist_sync_failure(
+            failed_workspace = _persist_sync_failure(
                 session,
                 workspace_id=workspace_id,
-                error_message=exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+                error_message=(
+                    exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                ),
             )
             if publish_events:
                 workspace_event_broker.publish(
@@ -887,19 +1210,25 @@ async def sync_workspace_data(
                     org_id=workspace_org_id,
                     trigger=trigger,
                     error={
-                        "message": workspace.sync_error if workspace is not None else (
-                            exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                        "message": (
+                            failed_workspace.sync_error
+                            if failed_workspace is not None
+                            else (
+                                exc.detail
+                                if isinstance(exc.detail, str)
+                                else str(exc.detail)
+                            )
                         )
                     },
                 )
-                if workspace is not None:
+                if failed_workspace is not None:
                     _publish_schedule_event(
-                        workspace,
+                        failed_workspace,
                         _pending_invite_count(session, workspace_org_id),
                     )
             raise
         except Exception as exc:
-            workspace = _persist_sync_failure(
+            failed_workspace = _persist_sync_failure(
                 session,
                 workspace_id=workspace_id,
                 error_message=str(exc),
@@ -910,12 +1239,16 @@ async def sync_workspace_data(
                     org_id=workspace_org_id,
                     trigger=trigger,
                     error={
-                        "message": workspace.sync_error if workspace is not None else str(exc)
+                        "message": (
+                            failed_workspace.sync_error
+                            if failed_workspace is not None
+                            else str(exc)
+                        )
                     },
                 )
-                if workspace is not None:
+                if failed_workspace is not None:
                     _publish_schedule_event(
-                        workspace,
+                        failed_workspace,
                         _pending_invite_count(session, workspace_org_id),
                     )
             raise HTTPException(
@@ -925,16 +1258,22 @@ async def sync_workspace_data(
 
 
 def list_stale_workspace_ids(session: Session) -> list[str]:
-    return [workspace.org_id for workspace in pick_due_workspaces(session, limit=10_000)]
+    return [
+        workspace.org_id for workspace in pick_due_workspaces(session, limit=10_000)
+    ]
 
 
 def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
     now = utc_now()
     baseline_cutoff = now - timedelta(minutes=SYNC_BASELINE_MINUTES)
     pending_cutoff = now - timedelta(seconds=SYNC_PENDING_INVITE_SECONDS)
-    pending_org_ids = session.execute(
-        select(Invite.org_id).where(Invite.status == "pending").distinct()
-    ).scalars().all()
+    pending_org_ids = (
+        session.execute(
+            select(Invite.org_id).where(Invite.status == "pending").distinct()
+        )
+        .scalars()
+        .all()
+    )
 
     candidate_filter = (
         (Workspace.next_sync_at <= now)
@@ -946,7 +1285,9 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
         candidate_filter = candidate_filter | Workspace.org_id.in_(pending_org_ids)
 
     workspaces = (
-        session.execute(select(Workspace).where(candidate_filter).order_by(Workspace.org_id))
+        session.execute(
+            select(Workspace).where(candidate_filter).order_by(Workspace.org_id)
+        )
         .scalars()
         .all()
     )
@@ -964,32 +1305,42 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
         last_sync = coerce_utc(workspace.last_sync)
 
         if next_sync_at and next_sync_at <= now:
-            workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+            workspace.sync_priority = _priority_for_workspace(
+                workspace, pending_invites, now
+            )
             due_workspaces.append(workspace)
             continue
 
         if workspace.last_sync is None:
             workspace.sync_reason = workspace.sync_reason or "baseline_refresh"
-            workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+            workspace.sync_priority = _priority_for_workspace(
+                workspace, pending_invites, now
+            )
             due_workspaces.append(workspace)
             continue
 
         if pending_invites > 0 and last_sync and last_sync <= pending_cutoff:
             workspace.sync_reason = "pending_invite_watch"
-            workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+            workspace.sync_priority = _priority_for_workspace(
+                workspace, pending_invites, now
+            )
             due_workspaces.append(workspace)
             continue
 
         if last_sync and last_sync <= baseline_cutoff:
             workspace.sync_reason = workspace.sync_reason or "baseline_refresh"
-            workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+            workspace.sync_priority = _priority_for_workspace(
+                workspace, pending_invites, now
+            )
             due_workspaces.append(workspace)
 
     due_workspaces.sort(
         key=lambda workspace: (
             -int(workspace.sync_priority or 0),
-            coerce_utc(workspace.next_sync_at) or datetime.min.replace(tzinfo=timezone.utc),
-            coerce_utc(workspace.last_activity_at) or datetime.min.replace(tzinfo=timezone.utc),
+            coerce_utc(workspace.next_sync_at)
+            or datetime.min.replace(tzinfo=timezone.utc),
+            coerce_utc(workspace.last_activity_at)
+            or datetime.min.replace(tzinfo=timezone.utc),
             workspace.org_id,
         )
     )
@@ -999,7 +1350,9 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
 async def run_sync_cycle(session_factory: Any) -> None:
     session = session_factory()
     try:
-        due_workspaces = pick_due_workspaces(session, limit=SYNC_MAX_PARALLEL_WORKSPACES)
+        due_workspaces = pick_due_workspaces(
+            session, limit=SYNC_MAX_PARALLEL_WORKSPACES
+        )
         due_ids = [workspace.org_id for workspace in due_workspaces]
     finally:
         session.close()
@@ -1013,7 +1366,9 @@ async def run_sync_cycle(session_factory: Any) -> None:
             if workspace is None:
                 return
             try:
-                await sync_workspace_data(session, workspace, trigger="auto", publish_events=True)
+                await sync_workspace_data(
+                    session, workspace, trigger="auto", publish_events=True
+                )
             except HTTPException:
                 return
         finally:
@@ -1022,7 +1377,9 @@ async def run_sync_cycle(session_factory: Any) -> None:
     await asyncio.gather(*(sync_one(org_id) for org_id in due_ids))
 
 
-async def _background_sync_loop(session_factory: Any, stop_event: asyncio.Event) -> None:
+async def _background_sync_loop(
+    session_factory: Any, stop_event: asyncio.Event
+) -> None:
     while not stop_event.is_set():
         try:
             await run_sync_cycle(session_factory)
@@ -1032,7 +1389,9 @@ async def _background_sync_loop(session_factory: Any, stop_event: asyncio.Event)
                 exc,
             )
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=SYNC_LOOP_INTERVAL_SECONDS)
+            await asyncio.wait_for(
+                stop_event.wait(), timeout=SYNC_LOOP_INTERVAL_SECONDS
+            )
         except TimeoutError:
             continue
 
