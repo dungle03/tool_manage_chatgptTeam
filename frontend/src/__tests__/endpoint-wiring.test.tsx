@@ -9,7 +9,7 @@ describe("endpoint wiring", () => {
     await inviteMember({ org_id: "org_001", email: "a@x.com" });
     await kickMember({ org_id: "org_001", member_id: 1 });
     await listInvites("org_001");
-    await resendInvite({ org_id: "org_001", invite_id: "inv_1" });
+    await resendInvite({ org_id: "org_001", invite_id: "inv_1", email: "a@x.com" });
     await cancelInvite({ org_id: "org_001", invite_id: "inv_1" });
     await syncWorkspace("org_001");
 

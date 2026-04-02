@@ -24,12 +24,15 @@ function authHeaders(): HeadersInit {
   return h;
 }
 
-export async function getWorkspaces(): Promise<Workspace[]> {
-  return requestJson("/api/workspaces", "GET");
+export async function getWorkspaces(options?: { forceFresh?: boolean }): Promise<Workspace[]> {
+  return requestJson("/api/workspaces", "GET", undefined, options);
 }
 
-export async function getWorkspaceMembers(orgId: string): Promise<Member[]> {
-  return requestJson(`/api/workspaces/${orgId}/members`, "GET");
+export async function getWorkspaceMembers(
+  orgId: string,
+  options?: { forceFresh?: boolean },
+): Promise<Member[]> {
+  return requestJson(`/api/workspaces/${orgId}/members`, "GET", undefined, options);
 }
 
 export async function syncWorkspace(orgId: string): Promise<WorkspaceSyncResult> {
@@ -53,11 +56,11 @@ export async function kickMember(payload: { org_id: string; member_id: number })
   return requestJson<MemberMutationResult>("/api/member", "DELETE", payload);
 }
 
-export async function listInvites(orgId: string): Promise<Invite[]> {
-  return requestJson<Invite[]>(`/api/invites?org_id=${orgId}`, "GET");
+export async function listInvites(orgId: string, options?: { forceFresh?: boolean }): Promise<Invite[]> {
+  return requestJson<Invite[]>(`/api/invites?org_id=${orgId}`, "GET", undefined, options);
 }
 
-export async function resendInvite(payload: { org_id: string; invite_id: string }): Promise<InviteMutationResult> {
+export async function resendInvite(payload: { org_id: string; invite_id: string; email?: string }): Promise<InviteMutationResult> {
   return requestJson<InviteMutationResult>("/api/resend-invite", "POST", payload);
 }
 
@@ -100,10 +103,16 @@ function invalidateGetCache() {
   inflightGets.clear();
 }
 
-async function requestJson<T = unknown>(url: string, method: string, body?: unknown): Promise<T> {
+async function requestJson<T = unknown>(
+  url: string,
+  method: string,
+  body?: unknown,
+  options?: { forceFresh?: boolean },
+): Promise<T> {
   const isGet = method === "GET";
+  const shouldBypassGetCache = isGet && options?.forceFresh;
 
-  if (isGet) {
+  if (isGet && !shouldBypassGetCache) {
     const cached = getCache.get(url);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data as T;
@@ -113,7 +122,7 @@ async function requestJson<T = unknown>(url: string, method: string, body?: unkn
     if (inflight) {
       return inflight as Promise<T>;
     }
-  } else {
+  } else if (!isGet) {
     invalidateGetCache();
   }
 
@@ -151,14 +160,14 @@ async function requestJson<T = unknown>(url: string, method: string, body?: unkn
     return data;
   })();
 
-  if (isGet) {
+  if (isGet && !shouldBypassGetCache) {
     inflightGets.set(url, request as Promise<unknown>);
   }
 
   try {
     return await request;
   } finally {
-    if (isGet) {
+    if (isGet && !shouldBypassGetCache) {
       inflightGets.delete(url);
     }
   }

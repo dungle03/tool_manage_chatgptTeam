@@ -71,7 +71,8 @@ async def invite_member(
                 (
                     item
                     for item in invites
-                    if str(item.get("email", "")).strip().lower() == payload.email.strip().lower()
+                    if str(item.get("email", "")).strip().lower()
+                    == payload.email.strip().lower()
                     and str(item.get("status", "pending")).strip().lower() == "pending"
                 ),
                 None,
@@ -130,6 +131,14 @@ async def resend_invite(
             Invite.invite_id == payload.invite_id,
         )
     ).scalar_one_or_none()
+    if not row and payload.email:
+        normalized_email = payload.email.strip().lower()
+        row = session.execute(
+            select(Invite).where(
+                Invite.org_id == payload.org_id,
+                Invite.email.ilike(normalized_email),
+            )
+        ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="invite not found")
 
@@ -214,6 +223,7 @@ async def cancel_invite(
             detail=f"failed to cancel invite upstream: {exc}",
         ) from exc
 
+    session.delete(row)
     schedule_followup_sync(
         session,
         workspace,

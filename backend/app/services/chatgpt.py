@@ -276,7 +276,7 @@ class ChatGPTService:
             errors.append(result.get("error", "failed to delete invite by id"))
 
         if email:
-            for payload in ({"email_addresses": [email]}, {"email_address": email}):
+            for payload in ({"email_address": email}, {"email_addresses": [email]}):
                 result = await self._request(
                     "DELETE",
                     f"/accounts/{account_id}/invites",
@@ -285,9 +285,16 @@ class ChatGPTService:
                 )
                 if result["success"]:
                     return result["data"]
-                errors.append(result.get("error", "failed to delete invite by email"))
 
-        detail = "; ".join(error for error in errors if error) or "failed to delete invite"
+                error_message = result.get("error", "failed to delete invite by email")
+                errors.append(error_message)
+
+                if "invite not found" in str(error_message).lower():
+                    return {"ok": True, "already_missing": True}
+
+        detail = (
+            "; ".join(error for error in errors if error) or "failed to delete invite"
+        )
         raise RuntimeError(detail)
 
     async def delete_member(

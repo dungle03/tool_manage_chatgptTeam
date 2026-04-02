@@ -73,6 +73,7 @@ async def delete_member(
                 detail=f"failed to remove member upstream: {exc}",
             ) from exc
 
+    session.delete(row)
     if workspace.member_count > 0:
         workspace.member_count -= 1
     schedule_followup_sync(

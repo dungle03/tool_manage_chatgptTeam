@@ -10,7 +10,7 @@ function formatDate(dateStr?: string | null): string {
 type InviteListProps = {
   invites: Invite[];
   busyInviteActions?: Record<string, "resend" | "revoke">;
-  onResend?: (inviteId: string) => Promise<void>;
+  onResend?: (inviteId: string, email: string) => Promise<void>;
   onRevoke?: (inviteId: string) => Promise<void>;
 };
 
@@ -48,7 +48,7 @@ function InviteListComponent({ invites, busyInviteActions = {}, onResend, onRevo
                     {onResend && (
                       <button
                         className="btn btn-secondary btn-compact"
-                        onClick={() => void onResend(invite.invite_id)}
+                        onClick={() => void onResend(invite.invite_id, invite.email)}
                         disabled={isBusy}
                       >
                         {busyAction === "resend" ? "Resending..." : "Resend"}

@@ -64,6 +64,7 @@ const DEFAULT_WS_STATE: WorkspaceState = {
 };
 
 const EVENT_REFRESH_WINDOW_MS = 450;
+const RECOVERY_REFRESH_COOLDOWN_MS = 5_000;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -156,8 +157,13 @@ export default function DashboardPage() {
   const seenEventSequencesRef = useRef(new Set<number>());
   const detailRefreshTimersRef = useRef(new Map<string, number>());
   const workspaceRefreshTimerRef = useRef<number | null>(null);
+  const lastRecoveryRefreshAtRef = useRef(0);
+  const workspaceListRequestVersionRef = useRef(0);
+  const workspaceDetailRequestVersionRef = useRef(new Map<string, number>());
   const wsStatesRef = useRef<Record<string, WorkspaceState>>({});
-  const loadWorkspacesRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null);
+  const loadWorkspacesRef = useRef<
+    ((options?: { silent?: boolean; forceFresh?: boolean }) => Promise<void>) | null
+  >(null);
   const refreshWorkspaceDetailsRef = useRef<((orgId: string) => Promise<void>) | null>(null);
   const triggerPostActionRefreshRef = useRef<
     ((orgId?: string, options?: { immediate?: boolean; includeDetails?: boolean }) => Promise<void>) | null
@@ -213,31 +219,47 @@ export default function DashboardPage() {
     setWorkspaces((prev) => mergeWorkspaceRecordList(prev, record));
   }, []);
 
-  const loadWorkspaces = useCallback(async (options?: { silent?: boolean }) => {
+  const loadWorkspaces = useCallback(async (options?: { silent?: boolean; forceFresh?: boolean }) => {
+    const requestVersion = workspaceListRequestVersionRef.current + 1;
+    workspaceListRequestVersionRef.current = requestVersion;
+
     try {
       if (!options?.silent) {
         setLoading(true);
       }
-      const data = await getWorkspaces();
+      const data = await getWorkspaces({ forceFresh: options?.forceFresh });
+      if (workspaceListRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       setWorkspaces(data);
     } catch (error) {
+      if (workspaceListRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       showToast(
         "Không thể tải workspace",
         getActionErrorCopy("sync", error),
         "error"
       );
     } finally {
-      if (!options?.silent) {
+      if (!options?.silent && workspaceListRequestVersionRef.current === requestVersion) {
         setLoading(false);
       }
     }
   }, []);
 
   const refreshWorkspaceDetails = useCallback(async (orgId: string) => {
+    const requestVersion = (workspaceDetailRequestVersionRef.current.get(orgId) ?? 0) + 1;
+    workspaceDetailRequestVersionRef.current.set(orgId, requestVersion);
+
     const [membersResult, invitesResult] = await Promise.allSettled([
-      getWorkspaceMembers(orgId),
-      listInvites(orgId),
+      getWorkspaceMembers(orgId, { forceFresh: true }),
+      listInvites(orgId, { forceFresh: true }),
     ]);
+
+    if (workspaceDetailRequestVersionRef.current.get(orgId) !== requestVersion) {
+      return;
+    }
 
     const nextPatch: Partial<WorkspaceState> = {
       syncing: false,
@@ -294,7 +316,8 @@ export default function DashboardPage() {
 
     workspaceRefreshTimerRef.current = window.setTimeout(() => {
       workspaceRefreshTimerRef.current = null;
-      void loadWorkspacesRef.current?.({ silent: true });
+      invalidateApiCache();
+      void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
     }, delayMs);
   }, []);
 
@@ -325,7 +348,7 @@ export default function DashboardPage() {
       const includeDetails = options?.includeDetails ?? true;
 
       if (options?.immediate) {
-        await loadWorkspacesRef.current?.({ silent: true });
+        await loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
         if (orgId && includeDetails) {
           const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
           if (state.loadedMembers) {
@@ -346,6 +369,27 @@ export default function DashboardPage() {
   useEffect(() => {
     triggerPostActionRefreshRef.current = triggerPostActionRefresh;
   }, [triggerPostActionRefresh]);
+
+  const recoverDashboardState = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastRecoveryRefreshAtRef.current < RECOVERY_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+    lastRecoveryRefreshAtRef.current = now;
+
+    invalidateApiCache();
+    await loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
+
+    const focusedOrgId = managedWorkspaceId ?? focusedWorkspaceId;
+    if (!focusedOrgId) {
+      return;
+    }
+
+    const state = wsStatesRef.current[focusedOrgId] ?? DEFAULT_WS_STATE;
+    if (state.loadedMembers) {
+      await refreshWorkspaceDetailsRef.current?.(focusedOrgId);
+    }
+  }, [focusedWorkspaceId, managedWorkspaceId]);
 
   const handleWorkspaceEvent = useCallback((event: WorkspaceEvent) => {
     if (seenEventSequencesRef.current.has(event.sequence)) {
@@ -472,7 +516,8 @@ export default function DashboardPage() {
 
       reconnectTimerRef.current = window.setTimeout(() => {
         connectWorkspaceEvents();
-        void loadWorkspacesRef.current?.({ silent: true });
+        invalidateApiCache();
+        void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
       }, delay);
     };
 
@@ -509,6 +554,66 @@ export default function DashboardPage() {
     };
   }, [connectWorkspaceEvents]);
 
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void recoverDashboardState();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void recoverDashboardState();
+    };
+
+    const handleOnline = () => {
+      void recoverDashboardState();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [recoverDashboardState]);
+
+  useEffect(() => {
+    const workspaceIds = new Set(workspaces.map((workspace) => workspace.org_id));
+
+    setWsStates((prev) => {
+      const entries = Object.entries(prev).filter(([orgId]) => workspaceIds.has(orgId));
+      if (entries.length === Object.keys(prev).length) {
+        return prev;
+      }
+      return Object.fromEntries(entries);
+    });
+
+    for (const orgId of workspaceDetailRequestVersionRef.current.keys()) {
+      if (!workspaceIds.has(orgId)) {
+        workspaceDetailRequestVersionRef.current.delete(orgId);
+      }
+    }
+
+    setFocusedWorkspaceId((current) =>
+      current && !workspaceIds.has(current) ? null : current
+    );
+    setManagedWorkspaceId((current) =>
+      current && !workspaceIds.has(current) ? null : current
+    );
+    setRenamingWorkspace((current) =>
+      current && !workspaceIds.has(current.org_id) ? null : current
+    );
+    setTokenWorkspace((current) =>
+      current && !workspaceIds.has(current.org_id) ? null : current
+    );
+    setDeletingWs((current) =>
+      current && !workspaceIds.has(current.org_id) ? null : current
+    );
+  }, [workspaces]);
+
   async function loadMembers(orgId: string) {
     const existingRequest = inflightMemberLoads.current.get(orgId);
     if (existingRequest) {
@@ -518,8 +623,8 @@ export default function DashboardPage() {
     const request = (async () => {
       updateWsState(orgId, { syncing: true });
       const [membersResult, invitesResult] = await Promise.allSettled([
-        getWorkspaceMembers(orgId),
-        listInvites(orgId),
+        getWorkspaceMembers(orgId, { forceFresh: true }),
+        listInvites(orgId, { forceFresh: true }),
       ]);
 
       const nextPatch: Partial<WorkspaceState> = {
@@ -566,20 +671,25 @@ export default function DashboardPage() {
   async function handleSync(orgId: string) {
     updateWsState(orgId, { syncing: true });
     try {
-      await syncWorkspace(orgId);
+      const result = await syncWorkspace(orgId);
+      applyWorkspaceSummary(result.updated_summary);
+
+      if (result.already_in_progress) {
+        void triggerPostActionRefresh(orgId, {
+          includeDetails: result.refresh_hint?.include_details ?? true,
+        });
+        return;
+      }
+
       const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
 
       if (state.loadedMembers) {
-        void triggerPostActionRefresh(orgId, { includeDetails: true });
+        void triggerPostActionRefresh(orgId, {
+          includeDetails: result.refresh_hint?.include_details ?? true,
+        });
       } else {
         await loadMembers(orgId);
       }
-
-      showToast(
-        "Đồng bộ hoàn tất",
-        `Workspace ${orgId} đã được cập nhật dữ liệu mới nhất.`,
-        "success"
-      );
     } catch (error) {
       showToast(
         "Sync thất bại",
@@ -605,11 +715,6 @@ export default function DashboardPage() {
       void triggerPostActionRefresh(orgId, {
         includeDetails: result.refresh_hint?.include_details ?? true,
       });
-      showToast(
-        "Đã xóa thành viên",
-        "Thành viên đã được gỡ khỏi workspace thành công.",
-        "success"
-      );
     } catch (error) {
       showToast(
         "Không thể xóa thành viên",
@@ -623,7 +728,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleResendInvite(orgId: string, inviteId: string) {
+  async function handleResendInvite(orgId: string, inviteId: string, inviteEmail?: string) {
     updateWsState(orgId, (current) => ({
       inviteActionState: {
         ...current.inviteActionState,
@@ -632,7 +737,7 @@ export default function DashboardPage() {
     }));
 
     try {
-      const result = await resendInvite({ org_id: orgId, invite_id: inviteId });
+      const result = await resendInvite({ org_id: orgId, invite_id: inviteId, email: inviteEmail });
       if (result.updated_record) {
         const updatedInvite = result.updated_record;
         updateWsState(orgId, (current) => ({
@@ -643,11 +748,6 @@ export default function DashboardPage() {
       void triggerPostActionRefresh(orgId, {
         includeDetails: result.refresh_hint?.include_details ?? true,
       });
-      showToast(
-        "Đã gửi lại lời mời",
-        "Lời mời đã được gửi lại cho thành viên và dashboard đã cập nhật.",
-        "success"
-      );
     } catch (error) {
       showToast(
         "Gửi lại thất bại",
@@ -680,11 +780,6 @@ export default function DashboardPage() {
       void triggerPostActionRefresh(orgId, {
         includeDetails: result.refresh_hint?.include_details ?? true,
       });
-      showToast(
-        "Đã thu hồi lời mời",
-        "Invite đã được revoke và dashboard đã cập nhật ngay lập tức.",
-        "success"
-      );
     } catch (error) {
       updateWsState(orgId, {
         invites: previousInvites,
@@ -753,11 +848,6 @@ export default function DashboardPage() {
         immediate: true,
         includeDetails: result.refresh_hint?.include_details ?? false,
       });
-      showToast(
-        "Đổi tên thành công",
-        `Workspace đã được đổi tên thành "${result.name}".`,
-        "success"
-      );
       setRenamingWorkspace(null);
     } catch (error) {
       const message = getActionErrorCopy("rename_workspace", error);
@@ -787,11 +877,6 @@ export default function DashboardPage() {
         immediate: true,
         includeDetails: result.refresh_hint?.include_details ?? false,
       });
-      showToast(
-        "Cập nhật token thành công",
-        `Workspace "${tokenWorkspace.name}" đã nhận token mới.`,
-        "success"
-      );
       setTokenWorkspace(null);
     } catch (error) {
       const message = getActionErrorCopy("sync", error);
@@ -1092,7 +1177,7 @@ export default function DashboardPage() {
                                   busyInviteActions={state.inviteActionState}
                                   onResend={
                                     ws.can_manage_members
-                                      ? (inviteId) => handleResendInvite(ws.org_id, inviteId)
+                                      ? (inviteId, email) => handleResendInvite(ws.org_id, inviteId, email)
                                       : undefined
                                   }
                                   onRevoke={
@@ -1276,7 +1361,7 @@ export default function DashboardPage() {
                             busyInviteActions={managedWorkspaceState.inviteActionState}
                             onResend={
                               managedWorkspace.can_manage_members
-                                ? (inviteId) => handleResendInvite(managedWorkspace.org_id, inviteId)
+                                ? (inviteId, email) => handleResendInvite(managedWorkspace.org_id, inviteId, email)
                                 : undefined
                             }
                             onRevoke={

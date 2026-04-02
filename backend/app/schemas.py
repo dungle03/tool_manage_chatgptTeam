@@ -95,3 +95,4 @@ class DeleteMemberByUserRequest(BaseModel):
 class InviteActionRequest(BaseModel):
     org_id: str
     invite_id: str
+    email: str | None = None
