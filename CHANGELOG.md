@@ -1,5 +1,24 @@
 # Changelog
 
+## [2026-04-03]
+
+### Added
+- `Invite.created_by_tool` provenance flag để phân biệt invite do tool tạo với invite sync từ remote
+- Regression test `test_external_pending_invite_guard.py` để khóa case pending invite từ người khác không được whitelist
+- Regression test `test_kick_member_regression.py` để khóa các hành vi quan trọng của flow kick member
+
+### Changed
+- Logic whitelist của auto-kick giờ chỉ tin tưởng:
+  - member đã tồn tại trong local DB
+  - pending invite do chính tool tạo
+- Route invite và sync pipeline đồng bộ metadata `created_by_tool` xuyên suốt từ lúc tạo invite đến lúc sync remote
+- Đồng bộ lại project memory sau khi rà full backend suite lần cuối
+
+### Fixed
+- Chặn trường hợp pending invite do thành viên khác mời bị hiểu nhầm là hợp lệ sau khi accept vào team
+- Cập nhật test realtime invite route để khớp signature mới của `send_invite(..., resend_emails=...)`
+- Xác nhận full backend suite pass `60/60` sau đợt siết logic cuối
+
 ## [2026-03-20]
 
 ### Changed

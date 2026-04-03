@@ -67,6 +67,7 @@ class Invite(Base):
     email: Mapped[str] = mapped_column(String, index=True)
     invite_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     status: Mapped[str] = mapped_column(String)
+    created_by_tool: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

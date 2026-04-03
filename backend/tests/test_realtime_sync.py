@@ -91,15 +91,26 @@ def test_sync_workspace_data_updates_workspace_and_emits_event(seed_data, monkey
             }
         ]
 
-    monkeypatch.setattr("app.services.events.workspace_event_broker.publish", capture_publish)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+    monkeypatch.setattr(
+        "app.services.events.workspace_event_broker.publish", capture_publish
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
+    )
 
     session = SessionLocal()
     try:
         workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
-        payload = __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+        payload = __import__("asyncio").run(
+            sync_workspace_data(session, workspace, trigger="manual")
+        )
         assert payload["ok"] is True
         assert any(event["type"] == "sync_started" for event in events)
         assert any(event["type"] == "workspace_updated" for event in events)
@@ -108,7 +119,11 @@ def test_sync_workspace_data_updates_workspace_and_emits_event(seed_data, monkey
         assert workspace.sync_error is None
         assert workspace.sync_finished_at is not None
         assert workspace.next_sync_at is not None
-        assert workspace.sync_reason in {"followup:0", "pending_invite_watch", "baseline_refresh"}
+        assert workspace.sync_reason in {
+            "followup:0",
+            "pending_invite_watch",
+            "baseline_refresh",
+        }
         assert any(event["type"] == "workspace_scheduled" for event in events)
     finally:
         session.close()
@@ -118,7 +133,9 @@ def test_schedule_followup_sync_marks_workspace_hot(seed_data):
     session = SessionLocal()
     try:
         workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
-        schedule_followup_sync(session, workspace, reason="invite_created", delay_seconds=5)
+        schedule_followup_sync(
+            session, workspace, reason="invite_created", delay_seconds=5
+        )
         session.commit()
         session.refresh(workspace)
 
@@ -144,7 +161,9 @@ def test_schedule_followup_sync_does_not_force_flush(seed_data, monkeypatch):
 
         monkeypatch.setattr(session, "flush", tracking_flush)
 
-        schedule_followup_sync(session, workspace, reason="invite_created", delay_seconds=5)
+        schedule_followup_sync(
+            session, workspace, reason="invite_created", delay_seconds=5
+        )
         assert flush_calls == []
 
         monkeypatch.setattr(session, "flush", original_flush)
@@ -160,7 +179,9 @@ def test_schedule_followup_sync_does_not_force_flush(seed_data, monkeypatch):
 def test_pick_due_workspaces_prioritizes_hot_and_pending(seed_data):
     session = SessionLocal()
     try:
-        hot_workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        hot_workspace = (
+            session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        )
         cold_workspace = Workspace(
             org_id="org_cold_001",
             account_id="acc_cold_001",
@@ -173,7 +194,9 @@ def test_pick_due_workspaces_prioritizes_hot_and_pending(seed_data):
         session.add(cold_workspace)
         session.commit()
 
-        schedule_followup_sync(session, hot_workspace, reason="invite_created", delay_seconds=0)
+        schedule_followup_sync(
+            session, hot_workspace, reason="invite_created", delay_seconds=0
+        )
         session.add(
             Invite(
                 org_id="org_001",
@@ -198,15 +221,32 @@ def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
-    async def fake_send_invite(_self, _access_token, _account_id, _email):
+    async def fake_send_invite(
+        _self, _access_token, _account_id, _email, resend_emails=True
+    ):
         return {"id": "inv_route_1"}
 
-    def fake_schedule_followup_sync(session, workspace, *, reason, delay_seconds=None, hot_window_seconds=None, publish_event=True):
+    def fake_schedule_followup_sync(
+        session,
+        workspace,
+        *,
+        reason,
+        delay_seconds=None,
+        hot_window_seconds=None,
+        publish_event=True
+    ):
         scheduled.append({"org_id": workspace.org_id, "reason": reason})
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite)
-    monkeypatch.setattr("app.routers.invites.schedule_followup_sync", fake_schedule_followup_sync)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
+    )
+    monkeypatch.setattr(
+        "app.routers.invites.schedule_followup_sync", fake_schedule_followup_sync
+    )
 
     response = client.post(
         "/api/invite",
@@ -217,7 +257,9 @@ def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     assert scheduled == [{"org_id": "org_001", "reason": "invite_created"}]
 
 
-def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(client, seed_data, monkeypatch):
+def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(
+    client, seed_data, monkeypatch
+):
     payloads: list[dict] = []
 
     def fake_in_progress(_org_id: str) -> bool:
@@ -228,8 +270,12 @@ def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(client, se
         payloads.append(payload)
         return payload
 
-    monkeypatch.setattr("app.routers.workspaces.is_workspace_sync_in_progress", fake_in_progress)
-    monkeypatch.setattr("app.routers.workspaces.build_sync_in_progress_payload", fake_build_payload)
+    monkeypatch.setattr(
+        "app.routers.workspaces.is_workspace_sync_in_progress", fake_in_progress
+    )
+    monkeypatch.setattr(
+        "app.routers.workspaces.build_sync_in_progress_payload", fake_build_payload
+    )
 
     response = client.post("/api/workspaces/org_001/sync")
 
@@ -240,7 +286,9 @@ def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(client, se
     assert len(payloads) == 1
 
 
-def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote(seed_data, monkeypatch):
+def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote(
+    seed_data, monkeypatch
+):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -257,9 +305,16 @@ def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote
             }
         ]
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
+    )
 
     session = SessionLocal()
     try:
@@ -275,7 +330,9 @@ def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote
         session.commit()
 
         workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
-        payload = __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+        payload = __import__("asyncio").run(
+            sync_workspace_data(session, workspace, trigger="manual")
+        )
 
         assert payload["ok"] is True
         invites = session.query(Invite).filter(Invite.org_id == "org_001").all()
@@ -286,7 +343,9 @@ def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote
         session.close()
 
 
-def test_sync_workspace_data_removes_pending_invite_when_member_exists(seed_data, monkeypatch):
+def test_sync_workspace_data_removes_pending_invite_when_member_exists(
+    seed_data, monkeypatch
+):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -304,9 +363,16 @@ def test_sync_workspace_data_removes_pending_invite_when_member_exists(seed_data
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
+    )
 
     session = SessionLocal()
     try:
@@ -322,7 +388,9 @@ def test_sync_workspace_data_removes_pending_invite_when_member_exists(seed_data
         session.commit()
 
         workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
-        payload = __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+        payload = __import__("asyncio").run(
+            sync_workspace_data(session, workspace, trigger="manual")
+        )
 
         assert payload["ok"] is True
         invites = session.query(Invite).filter(Invite.org_id == "org_001").all()
@@ -332,7 +400,9 @@ def test_sync_workspace_data_removes_pending_invite_when_member_exists(seed_data
         session.close()
 
 
-def test_workspace_events_stream_requires_auth_when_admin_token_set(client, monkeypatch):
+def test_workspace_events_stream_requires_auth_when_admin_token_set(
+    client, monkeypatch
+):
     monkeypatch.setenv("ADMIN_TOKEN", "secret-token")
     response = client.get("/api/events/workspaces")
     assert response.status_code == 401
@@ -349,7 +419,9 @@ def test_verify_sse_admin_token_accepts_query_token(monkeypatch):
     assert token == "secret-token"
 
 
-def test_workspace_list_falls_back_to_user_role_for_invalid_access_token(client, seed_data):
+def test_workspace_list_falls_back_to_user_role_for_invalid_access_token(
+    client, seed_data
+):
     session = SessionLocal()
     try:
         workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
@@ -409,12 +481,18 @@ def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
             message = message % args
         log_messages.append(message)
 
-    monkeypatch.setattr("app.services.workspace_sync.run_sync_cycle", fake_run_sync_cycle)
+    monkeypatch.setattr(
+        "app.services.workspace_sync.run_sync_cycle", fake_run_sync_cycle
+    )
     monkeypatch.setattr("app.services.workspace_sync.asyncio.wait_for", fake_wait_for)
-    monkeypatch.setattr("app.services.workspace_sync.logger.exception", fake_log_exception)
+    monkeypatch.setattr(
+        "app.services.workspace_sync.logger.exception", fake_log_exception
+    )
 
     __import__("asyncio").run(
-        __import__("app.services.workspace_sync", fromlist=["_background_sync_loop"])._background_sync_loop(
+        __import__(
+            "app.services.workspace_sync", fromlist=["_background_sync_loop"]
+        )._background_sync_loop(
             session_factory=lambda: None,
             stop_event=_StopEvent(),
         )
@@ -426,7 +504,9 @@ def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
     ]
 
 
-def test_sync_workspace_data_persists_error_state_after_commit_failure(seed_data, monkeypatch):
+def test_sync_workspace_data_persists_error_state_after_commit_failure(
+    seed_data, monkeypatch
+):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -436,9 +516,16 @@ def test_sync_workspace_data_persists_error_state_after_commit_failure(seed_data
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
+    )
 
     session = SessionLocal()
     original_commit = session.commit
@@ -457,7 +544,9 @@ def test_sync_workspace_data_persists_error_state_after_commit_failure(seed_data
         raised_exception = None
 
         try:
-            __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="manual"))
+            __import__("asyncio").run(
+                sync_workspace_data(session, workspace, trigger="manual")
+            )
         except Exception as exc:
             raised_exception = exc
 
@@ -482,7 +571,9 @@ def test_workspace_events_path_is_registered_in_openapi():
     assert "/api/events/workspaces" in paths
 
 
-def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(seed_data, monkeypatch):
+def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(
+    seed_data, monkeypatch
+):
     async def fake_refresh_access_token(_self, _session_token, _account_id=None):
         return {"access_token": "fresh-token", "session_token": _session_token}
 
@@ -492,9 +583,16 @@ def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_delete
     async def fake_get_invites(_self, _access_token, _account_id):
         raise RuntimeError("account_deactivated")
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.refresh_access_token",
+        fake_refresh_access_token,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
+    )
 
     session = SessionLocal()
     try:
@@ -512,7 +610,9 @@ def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_delete
                 try:
                     deleted = cleanup_session.get(Workspace, workspace_id)
                     if deleted is not None:
-                        cleanup_session.query(Invite).where(Invite.org_id == deleted.org_id).delete()
+                        cleanup_session.query(Invite).where(
+                            Invite.org_id == deleted.org_id
+                        ).delete()
                         cleanup_session.delete(deleted)
                         cleanup_session.commit()
                 finally:
@@ -522,7 +622,9 @@ def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_delete
 
         raised_exception = None
         try:
-            __import__("asyncio").run(sync_workspace_data(session, workspace, trigger="auto"))
+            __import__("asyncio").run(
+                sync_workspace_data(session, workspace, trigger="auto")
+            )
         except Exception as exc:
             raised_exception = exc
 

@@ -90,6 +90,7 @@ def serialize_invite_row(invite: Invite) -> dict[str, Any]:
         "email": invite.email,
         "invite_id": invite.invite_id,
         "status": invite.status,
+        "created_by_tool": bool(invite.created_by_tool),
         "created_at": serialize_datetime(invite.created_at),
     }
 
@@ -251,6 +252,7 @@ def _mark_missing_findings_resolved(
         .scalars()
         .all()
     )
+    updated = False
     for finding in findings:
         finding_key = (
             normalize_identity(finding.remote_id),
@@ -259,13 +261,67 @@ def _mark_missing_findings_resolved(
         if finding_key in active_remote_keys:
             continue
         if finding.status in _active_unauthorized_statuses():
+            previous_status = finding.status
             finding.resolved_at = resolved_at
             finding.updated_at = resolved_at
-            if finding.status == "detected":
-                finding.status = "trusted"
+            finding.status = "trusted"
+            if previous_status == "detected":
                 finding.action_reason = (
                     finding.action_reason or "member_no_longer_present"
                 )
+            else:
+                finding.action_reason = (
+                    finding.action_reason
+                    or "member_no_longer_present_after_kick_failure"
+                )
+            updated = True
+
+    if updated:
+        session.flush()
+
+
+def _auto_resolve_stale_finding(
+    session: Session,
+    *,
+    workspace: Workspace,
+    remote_id: str | None,
+    email: str | None,
+    resolved_at: datetime,
+) -> None:
+    """Resolve any active finding for a member who is now whitelisted.
+
+    This handles the case where an invitee was flagged as unauthorized
+    (e.g. they accepted an invite after auto-kick was enabled) but is
+    now a legitimate member in the whitelist.
+    """
+    if not remote_id and not email:
+        return
+
+    filters = [UnauthorizedFinding.org_id == workspace.org_id]
+    identity_clauses = []
+    if remote_id:
+        identity_clauses.append(func.lower(UnauthorizedFinding.remote_id) == remote_id)
+    if email:
+        identity_clauses.append(func.lower(UnauthorizedFinding.email) == email)
+    if len(identity_clauses) == 1:
+        filters.append(identity_clauses[0])
+    else:
+        filters.append(identity_clauses[0] | identity_clauses[1])
+
+    filters.append(UnauthorizedFinding.status.in_(_active_unauthorized_statuses()))
+
+    stale_findings = (
+        session.execute(select(UnauthorizedFinding).where(*filters)).scalars().all()
+    )
+
+    for finding in stale_findings:
+        finding.status = "trusted"
+        finding.action_reason = "whitelisted_member_auto_resolved"
+        finding.resolved_at = resolved_at
+        finding.updated_at = resolved_at
+
+    if stale_findings:
+        session.flush()
 
 
 def build_action_response(
@@ -977,11 +1033,31 @@ async def sync_workspace_data(
                 if normalize_identity(member.email)
             }
 
+            # Only whitelist pending invites that were explicitly created or
+            # confirmed via this tool. Remote-only pending invites can be
+            # initiated by other members and must not grant authorization.
+            pending_invites_rows = (
+                session.execute(
+                    select(Invite).where(
+                        Invite.org_id == workspace.org_id,
+                        Invite.status == "pending",
+                        Invite.created_by_tool.is_(True),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for inv in pending_invites_rows:
+                inv_email = normalize_identity(inv.email)
+                if inv_email:
+                    whitelisted_emails.add(inv_email)
+
             normalized_remote_members = [
                 _normalize_remote_member(item) for item in remote_members
             ]
             unauthorized_members: list[dict[str, Any]] = []
             active_remote_keys: set[tuple[str | None, str | None]] = set()
+            auto_kicked_remote_ids: set[str] = set()
             detected_at = utc_now()
 
             for member in normalized_remote_members:
@@ -1014,6 +1090,9 @@ async def sync_workspace_data(
                                 finding.status = "kicked"
                                 finding.action_reason = "auto_kick_sync_enforcement"
                                 finding.resolved_at = detected_at
+                                normalized_remote_id = normalize_identity(remote_id)
+                                if normalized_remote_id:
+                                    auto_kicked_remote_ids.add(normalized_remote_id)
                             except Exception as exc:
                                 finding.status = "kick_failed"
                                 finding.action_reason = str(exc)
@@ -1023,6 +1102,23 @@ async def sync_workspace_data(
                             finding.action_reason = "remote_id_missing_or_owner"
                             finding.resolved_at = None
                         finding.updated_at = detected_at
+                else:
+                    # Member is legitimate — auto-resolve any stale finding
+                    # (e.g. invitee accepted after auto-kick was enabled)
+                    _auto_resolve_stale_finding(
+                        session,
+                        workspace=workspace,
+                        remote_id=remote_id_key,
+                        email=email_key,
+                        resolved_at=detected_at,
+                    )
+
+            synced_members_for_cache = [
+                member
+                for member in normalized_remote_members
+                if normalize_identity(member.get("remote_id"))
+                not in auto_kicked_remote_ids
+            ]
 
             if unauthorized_members:
                 workspace.unauthorized_last_detected_at = detected_at
@@ -1055,7 +1151,7 @@ async def sync_workspace_data(
 
             synced_member_emails: set[str] = set()
 
-            for member in normalized_remote_members:
+            for member in synced_members_for_cache:
                 normalized_member_email = (member.get("email") or "").strip().lower()
                 if normalized_member_email:
                     synced_member_emails.add(normalized_member_email)
@@ -1089,7 +1185,7 @@ async def sync_workspace_data(
                 if existing_invite is None and normalized_email:
                     existing_invite = invites_by_email.get(normalized_email)
 
-                if existing_invite is not None:
+                if existing_invite:
                     existing_invite.email = email
                     existing_invite.invite_id = invite_id
                     existing_invite.status = item.get("status") or "pending"
@@ -1103,6 +1199,7 @@ async def sync_workspace_data(
                         email=email,
                         invite_id=invite_id,
                         status=item.get("status") or "pending",
+                        created_by_tool=False,
                         created_at=created_at or datetime.now(timezone.utc),
                     )
                     session.add(invite)
@@ -1125,7 +1222,7 @@ async def sync_workspace_data(
                     continue
                 session.delete(existing_invite)
 
-            workspace.member_count = len(remote_members)
+            workspace.member_count = len(synced_members_for_cache)
             workspace.last_sync = utc_now()
             workspace.sync_finished_at = workspace.last_sync
             workspace.status = "live"

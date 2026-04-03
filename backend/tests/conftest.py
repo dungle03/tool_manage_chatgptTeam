@@ -2,7 +2,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-TEST_DB_PATH = Path(__file__).resolve().parent / f"workspace_manager_test_{os.getpid()}.db"
+TEST_DB_PATH = (
+    Path(__file__).resolve().parent / f"workspace_manager_test_{os.getpid()}.db"
+)
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
 os.environ.setdefault("WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC", "1")
 
@@ -71,6 +73,7 @@ def seed_data():
             email="pending@company.com",
             invite_id="inv_seed_1",
             status="pending",
+            created_by_tool=True,
             created_at=datetime.now(timezone.utc),
         )
         session.add_all([member, owner, invite])

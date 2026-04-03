@@ -31,8 +31,10 @@ def test_invite_then_list_invites(client, seed_data, monkeypatch):
     assert body["action"] == "invite_create"
     assert body["invite_id"] == "inv_remote_created"
     assert body["invite"]["invite_id"] == "inv_remote_created"
+    assert body["invite"]["created_by_tool"] is True
     assert body["updated_record"]["invite_id"] == "inv_remote_created"
     assert body["updated_record"]["email"] == "new@company.com"
+    assert body["updated_record"]["created_by_tool"] is True
     assert body["updated_summary"]["org_id"] == "org_001"
     assert body["refresh_hint"]["scope"] == "workspace_detail"
     assert body["refresh_hint"]["reason"] == "invite_created"
@@ -41,8 +43,8 @@ def test_invite_then_list_invites(client, seed_data, monkeypatch):
 
     list_res = client.get("/api/invites", params={"org_id": "org_001"})
     assert list_res.status_code == 200
-    emails = [x["email"] for x in list_res.json()]
-    assert "new@company.com" in emails
+    invites = {x["email"]: x for x in list_res.json()}
+    assert invites["new@company.com"]["created_by_tool"] is True
 
 
 def test_invite_uses_existing_pending_invite_without_creating_duplicate(
@@ -75,6 +77,7 @@ def test_invite_uses_existing_pending_invite_without_creating_duplicate(
     assert body["ok"] is True
     assert body["invite_id"] == "inv_seed_1"
     assert body["invite"]["invite_id"] == "inv_seed_1"
+    assert body["invite"]["created_by_tool"] is True
     assert body["already_pending"] is True
     assert body["refresh_hint"]["reason"] == "invite_already_pending"
     assert sent_calls == []

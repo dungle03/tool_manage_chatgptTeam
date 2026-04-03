@@ -260,17 +260,24 @@ def get_workspace_members(
 
 @router.get("/api/unauthorized-findings")
 def get_all_unauthorized_findings(
+    include_resolved: bool = False,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
-    """Return all unauthorized findings across all workspaces, enriched with workspace name."""
+    """Return global unauthorized findings, active-only by default, enriched with workspace name."""
     workspace_names: dict[str, str] = {}
     for ws in session.execute(select(Workspace)).scalars().all():
         workspace_names[ws.org_id] = ws.name
 
+    statement = select(UnauthorizedFinding)
+    if not include_resolved:
+        statement = statement.where(
+            UnauthorizedFinding.status.in_(("detected", "kick_failed"))
+        )
+
     rows = (
         session.execute(
-            select(UnauthorizedFinding).order_by(
+            statement.order_by(
                 UnauthorizedFinding.last_seen_at.desc(),
                 UnauthorizedFinding.id.desc(),
             )

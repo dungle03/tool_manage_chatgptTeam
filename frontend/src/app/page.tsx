@@ -465,17 +465,17 @@ export default function DashboardPage() {
       );
 
       // Auto-refresh global unauthorized findings banner
-      if (event.summary?.unauthorized_active_count != null && event.summary.unauthorized_active_count > 0) {
-        void (async () => {
-          try {
-            const findings = await listAllUnauthorizedFindings({ forceFresh: true });
-            setGlobalUnauthorizedFindings(findings);
-            setUnauthorizedBannerDismissed(false);
-          } catch {
-            // silent
-          }
-        })();
-      }
+      void (async () => {
+        try {
+          const findings = await listAllUnauthorizedFindings({ forceFresh: true });
+          setGlobalUnauthorizedFindings(
+            findings.filter((finding) => finding.status !== "trusted")
+          );
+          setUnauthorizedBannerDismissed(false);
+        } catch {
+          // silent
+        }
+      })();
 
       if (event.trigger !== "auto") {
         showToastRef.current?.(
@@ -556,7 +556,9 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const findings = await listAllUnauthorizedFindings({ forceFresh: true });
-        setGlobalUnauthorizedFindings(findings);
+        setGlobalUnauthorizedFindings(
+          findings.filter((finding) => finding.status !== "trusted")
+        );
         setUnauthorizedBannerDismissed(false);
       } catch {
         // silent — banner is optional

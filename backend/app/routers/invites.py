@@ -36,6 +36,7 @@ def get_invites(
             "email": row.email,
             "invite_id": row.invite_id,
             "status": row.status,
+            "created_by_tool": bool(row.created_by_tool),
             "created_at": row.created_at.isoformat(),
         }
         for row in rows
@@ -72,6 +73,9 @@ async def invite_member(
         .first()
     )
     if existing_invite:
+        if not existing_invite.created_by_tool:
+            existing_invite.created_by_tool = True
+            session.flush()
         invite_payload = serialize_invite_row(existing_invite)
         return build_action_response(
             action="invite_create",
@@ -127,6 +131,7 @@ async def invite_member(
         email=normalized_email,
         invite_id=str(remote_invite_id or normalized_email),
         status="pending",
+        created_by_tool=True,
         created_at=datetime.now(timezone.utc),
     )
     session.add(invite)

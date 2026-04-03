@@ -114,6 +114,16 @@ def _migrate_add_missing_columns() -> None:
             )
 
         if inspector.has_table("invites"):
+            existing = {c["name"] for c in inspector.get_columns("invites")}
+            new_cols = {
+                "created_by_tool": "BOOLEAN DEFAULT 0",
+            }
+            for col, col_type in new_cols.items():
+                if col not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE invites ADD COLUMN {col} {col_type}")
+                    )
+
             _create_index_if_missing(
                 conn, "invites", "ix_invites_org_id_invite_id", "org_id, invite_id"
             )

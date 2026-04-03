@@ -42,6 +42,7 @@ class InviteOut(BaseModel):
     email: str
     invite_id: str
     status: str
+    created_by_tool: bool = False
     created_at: datetime
 
 
