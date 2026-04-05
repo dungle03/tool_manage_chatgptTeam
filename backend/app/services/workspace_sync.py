@@ -702,31 +702,10 @@ def get_current_user_role(workspace: Workspace, session: Session) -> str:
 
 
 async def resolve_access_token(workspace: Workspace) -> str:
-    account_id = workspace.account_id or workspace.org_id
-
-    if workspace.session_token:
-        try:
-            refreshed = await chatgpt_service.refresh_access_token(
-                workspace.session_token,
-                account_id,
-            )
-            refreshed_access_token = str(refreshed["access_token"])
-            workspace.access_token = refreshed_access_token
-            workspace.session_token = (
-                refreshed.get("session_token") or workspace.session_token
-            )
-            return refreshed_access_token
-        except RuntimeError:
-            if workspace.access_token:
-                return workspace.access_token
-            raise
-
     if workspace.access_token:
         return workspace.access_token
 
-    raise HTTPException(
-        status_code=400, detail="workspace missing access/session token"
-    )
+    raise HTTPException(status_code=400, detail="workspace missing access token")
 
 
 def workspace_to_dict(

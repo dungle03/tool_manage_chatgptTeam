@@ -15,11 +15,7 @@ type ImportDialogProps = {
   onImported: (result: ImportDialogResult) => void;
 };
 
-type Tab = "session" | "access";
-
 export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
-  const [tab, setTab] = useState<Tab>("access");
-  const [sessionToken, setSessionToken] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,13 +26,10 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
   const [syncWarnings, setSyncWarnings] = useState<string[]>([]);
 
   async function handleImport() {
-    const payload =
-      tab === "session"
-        ? { session_token: sessionToken.trim() }
-        : { access_token: accessToken.trim() };
+    const payload = { access_token: accessToken.trim() };
 
-    if (!Object.values(payload).some(Boolean)) {
-      setError("Vui lòng nhập token.");
+    if (!payload.access_token) {
+      setError("Vui lòng nhập access token.");
       return;
     }
 
@@ -133,54 +126,20 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
 
         {step === "input" && (
           <>
-            <div className="import-tab-bar">
-              <button
-                className={`import-tab${tab === "access" ? " active" : ""}`}
-                onClick={() => setTab("access")}
-              >
-                Access Token
-              </button>
-              <button
-                className={`import-tab${tab === "session" ? " active" : ""}`}
-                onClick={() => setTab("session")}
-              >
-                Session Token
-              </button>
+            <div className="import-field-group">
+              <label className="form-label">Access Token (Bearer)</label>
+              <textarea
+                className="import-textarea"
+                placeholder="Dán Access Token (Bearer) từ ChatGPT vào đây..."
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+                rows={4}
+              />
+              <p className="import-help">
+                📋 <strong>Cách lấy:</strong> Mở chatgpt.com → F12 → Network → bất kỳ request →
+                xem header <code>Authorization: Bearer ...</code>
+              </p>
             </div>
-
-            {tab === "session" && (
-              <div className="import-field-group">
-                <label className="form-label">Session Token</label>
-                <textarea
-                  className="import-textarea"
-                  placeholder="Dán __Secure-next-auth.session-token từ cookie chatgpt.com vào đây..."
-                  value={sessionToken}
-                  onChange={(e) => setSessionToken(e.target.value)}
-                  rows={4}
-                />
-                <p className="import-help">
-                  📋 <strong>Cách lấy:</strong> Mở chatgpt.com → F12 → Application → Cookies →
-                  sao chép giá trị <code>__Secure-next-auth.session-token</code>
-                </p>
-              </div>
-            )}
-
-            {tab === "access" && (
-              <div className="import-field-group">
-                <label className="form-label">Access Token (Bearer)</label>
-                <textarea
-                  className="import-textarea"
-                  placeholder="Dán Access Token (Bearer) từ ChatGPT vào đây..."
-                  value={accessToken}
-                  onChange={(e) => setAccessToken(e.target.value)}
-                  rows={4}
-                />
-                <p className="import-help">
-                  📋 <strong>Cách lấy:</strong> Mở chatgpt.com → F12 → Network → bất kỳ request →
-                  xem header <code>Authorization: Bearer ...</code>
-                </p>
-              </div>
-            )}
 
             {error && (
               <div className="import-error">

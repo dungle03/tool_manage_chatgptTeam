@@ -7,9 +7,6 @@ from app.models import Invite, UnauthorizedFinding, Workspace
 def test_remote_only_pending_invite_is_not_whitelisted_and_is_auto_kicked(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     remote_members_state = {
         "members": [
             {
@@ -60,10 +57,6 @@ def test_remote_only_pending_invite_is_not_whitelisted_and_is_auto_kicked(
         ]
         return {"ok": True}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members",
         fake_get_members,

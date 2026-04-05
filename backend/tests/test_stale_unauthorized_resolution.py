@@ -7,9 +7,6 @@ from app.models import UnauthorizedFinding
 def test_sync_auto_resolves_stale_finding_for_member_now_whitelisted(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -38,10 +35,6 @@ def test_sync_auto_resolves_stale_finding_for_member_now_whitelisted(
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members",
         fake_get_members,

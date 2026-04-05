@@ -5,9 +5,6 @@ from app.services.chatgpt import ChatGPTService
 
 
 def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     captured_send = {}
 
     async def fake_send_invite(
@@ -26,10 +23,6 @@ def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
         captured_cancel["email"] = email
         return {"ok": True}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )
@@ -84,9 +77,6 @@ def test_resend_and_cancel_invite(client, seed_data, monkeypatch):
 def test_resend_invite_falls_back_to_email_when_invite_id_is_stale(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     captured_send = {}
 
     async def fake_send_invite(
@@ -96,10 +86,6 @@ def test_resend_invite_falls_back_to_email_when_invite_id_is_stale(
         captured_send["resend_emails"] = resend_emails
         return {"id": "inv_remote_resend"}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )

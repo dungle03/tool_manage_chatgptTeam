@@ -28,6 +28,7 @@
 ### Task 1: Add failing backend tests for created_time priority and UTC normalization
 
 **Files:**
+
 - Modify: `backend/tests/test_workspace_sync.py`
 
 - [ ] **Step 1: Ensure pytest import exists**
@@ -42,9 +43,6 @@ import pytest
 
 ```python
 def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(seed_data, monkeypatch):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -62,7 +60,6 @@ def test_sync_workspace_prefers_created_time_and_normalizes_to_utc(seed_data, mo
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
 
@@ -107,6 +104,7 @@ git commit -m "fix(sync): prioritize created_time and normalize member dates to 
 ### Task 2: Add failing backend tests for deterministic fallback order
 
 **Files:**
+
 - Modify: `backend/tests/test_workspace_sync.py`
 
 - [ ] **Step 1: Write failing parameterized fallback-order tests**
@@ -139,9 +137,6 @@ git commit -m "fix(sync): prioritize created_time and normalize member dates to 
     ],
 )
 def test_sync_workspace_uses_expected_date_field_priority(seed_data, monkeypatch, payload, expected_created_at):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         member = {
             "id": "user_1",
@@ -156,7 +151,6 @@ def test_sync_workspace_uses_expected_date_field_priority(seed_data, monkeypatch
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.refresh_access_token", fake_refresh_access_token)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_members", fake_get_members)
     monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites)
 
@@ -197,6 +191,7 @@ git commit -m "test(sync): enforce member date extraction priority"
 ### Task 3: Add failing backend tests for epoch parsing and invalid-date behavior
 
 **Files:**
+
 - Modify: `backend/tests/test_workspace_sync.py`
 - Modify: `backend/app/routers/workspaces.py`
 
@@ -256,6 +251,7 @@ git commit -m "feat(sync): support epoch date parsing for member created_at"
 ### Task 3: Add failing frontend tests for over-limit logic
 
 **Files:**
+
 - Create: `frontend/src/__tests__/member-table-overlimit.test.tsx`
 
 - [ ] **Step 1: Write failing tests**
@@ -281,109 +277,325 @@ function makeMember(overrides: Partial<any>) {
 
 it("does not highlight when active members are <= 5", () => {
   const members = [1, 2, 3, 4, 5].map((n) =>
-    makeMember({ id: n, remote_id: `u-${n}`, email: `${n}@x.com`, created_at: `2026-03-0${n}T00:00:00Z` }),
+    makeMember({
+      id: n,
+      remote_id: `u-${n}`,
+      email: `${n}@x.com`,
+      created_at: `2026-03-0${n}T00:00:00Z`,
+    }),
   );
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("1@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+  expect(screen.getByText("1@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("highlights exactly 6th+ oldest active members", () => {
   const members = [1, 2, 3, 4, 5, 6, 7].map((n) =>
-    makeMember({ id: n, remote_id: `u-${n}`, email: `${n}@x.com`, created_at: `2026-03-0${Math.min(n, 9)}T00:00:00Z` }),
+    makeMember({
+      id: n,
+      remote_id: `u-${n}`,
+      email: `${n}@x.com`,
+      created_at: `2026-03-0${Math.min(n, 9)}T00:00:00Z`,
+    }),
   );
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("6@x.com").closest("tr")).toHaveClass("member-overlimit-row");
-  expect(screen.getByText("7@x.com").closest("tr")).toHaveClass("member-overlimit-row");
+  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("6@x.com").closest("tr")).toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("7@x.com").closest("tr")).toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("excludes generic non-active statuses from quota classification", () => {
   const members = [
-    makeMember({ id: 1, remote_id: "u-1", email: "1@x.com", status: "active", created_at: "2026-03-02T00:00:00Z" }),
-    makeMember({ id: 2, remote_id: "u-2", email: "2@x.com", status: "active", created_at: "2026-03-03T00:00:00Z" }),
-    makeMember({ id: 3, remote_id: "u-3", email: "3@x.com", status: "active", created_at: "2026-03-04T00:00:00Z" }),
-    makeMember({ id: 4, remote_id: "u-4", email: "4@x.com", status: "active", created_at: "2026-03-05T00:00:00Z" }),
-    makeMember({ id: 5, remote_id: "u-5", email: "5@x.com", status: "active", created_at: "2026-03-06T00:00:00Z" }),
-    makeMember({ id: 99, remote_id: "u-99", email: "99@x.com", status: "inactive", created_at: "2026-03-01T00:00:00Z" }),
+    makeMember({
+      id: 1,
+      remote_id: "u-1",
+      email: "1@x.com",
+      status: "active",
+      created_at: "2026-03-02T00:00:00Z",
+    }),
+    makeMember({
+      id: 2,
+      remote_id: "u-2",
+      email: "2@x.com",
+      status: "active",
+      created_at: "2026-03-03T00:00:00Z",
+    }),
+    makeMember({
+      id: 3,
+      remote_id: "u-3",
+      email: "3@x.com",
+      status: "active",
+      created_at: "2026-03-04T00:00:00Z",
+    }),
+    makeMember({
+      id: 4,
+      remote_id: "u-4",
+      email: "4@x.com",
+      status: "active",
+      created_at: "2026-03-05T00:00:00Z",
+    }),
+    makeMember({
+      id: 5,
+      remote_id: "u-5",
+      email: "5@x.com",
+      status: "active",
+      created_at: "2026-03-06T00:00:00Z",
+    }),
+    makeMember({
+      id: 99,
+      remote_id: "u-99",
+      email: "99@x.com",
+      status: "inactive",
+      created_at: "2026-03-01T00:00:00Z",
+    }),
   ];
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("99@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+  expect(screen.getByText("99@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("excludes pending members from quota classification", () => {
   const members = [
-    makeMember({ id: 1, remote_id: "u-1", email: "1@x.com", status: "active", created_at: "2026-03-02T00:00:00Z" }),
-    makeMember({ id: 2, remote_id: "u-2", email: "2@x.com", status: "active", created_at: "2026-03-03T00:00:00Z" }),
-    makeMember({ id: 3, remote_id: "u-3", email: "3@x.com", status: "active", created_at: "2026-03-04T00:00:00Z" }),
-    makeMember({ id: 4, remote_id: "u-4", email: "4@x.com", status: "active", created_at: "2026-03-05T00:00:00Z" }),
-    makeMember({ id: 5, remote_id: "u-5", email: "5@x.com", status: "active", created_at: "2026-03-06T00:00:00Z" }),
-    makeMember({ id: 88, remote_id: "u-88", email: "88@x.com", status: "pending", created_at: "2026-03-01T00:00:00Z" }),
+    makeMember({
+      id: 1,
+      remote_id: "u-1",
+      email: "1@x.com",
+      status: "active",
+      created_at: "2026-03-02T00:00:00Z",
+    }),
+    makeMember({
+      id: 2,
+      remote_id: "u-2",
+      email: "2@x.com",
+      status: "active",
+      created_at: "2026-03-03T00:00:00Z",
+    }),
+    makeMember({
+      id: 3,
+      remote_id: "u-3",
+      email: "3@x.com",
+      status: "active",
+      created_at: "2026-03-04T00:00:00Z",
+    }),
+    makeMember({
+      id: 4,
+      remote_id: "u-4",
+      email: "4@x.com",
+      status: "active",
+      created_at: "2026-03-05T00:00:00Z",
+    }),
+    makeMember({
+      id: 5,
+      remote_id: "u-5",
+      email: "5@x.com",
+      status: "active",
+      created_at: "2026-03-06T00:00:00Z",
+    }),
+    makeMember({
+      id: 88,
+      remote_id: "u-88",
+      email: "88@x.com",
+      status: "pending",
+      created_at: "2026-03-01T00:00:00Z",
+    }),
   ];
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("88@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+  expect(screen.getByText("88@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("excludes unknown-date active members from classification", () => {
   const members = [
-    makeMember({ id: 1, remote_id: "u-1", email: "1@x.com", status: "active", created_at: "2026-03-01T00:00:00Z" }),
-    makeMember({ id: 2, remote_id: "u-2", email: "2@x.com", status: "active", created_at: "2026-03-02T00:00:00Z" }),
-    makeMember({ id: 3, remote_id: "u-3", email: "3@x.com", status: "active", created_at: "2026-03-03T00:00:00Z" }),
-    makeMember({ id: 4, remote_id: "u-4", email: "4@x.com", status: "active", created_at: "2026-03-04T00:00:00Z" }),
-    makeMember({ id: 5, remote_id: "u-5", email: "5@x.com", status: "active", created_at: "2026-03-05T00:00:00Z" }),
-    makeMember({ id: 6, remote_id: "u-6", email: "6@x.com", status: "active", created_at: "2026-03-06T00:00:00Z" }),
-    makeMember({ id: 77, remote_id: "u-77", email: "77@x.com", status: "active", created_at: null }),
+    makeMember({
+      id: 1,
+      remote_id: "u-1",
+      email: "1@x.com",
+      status: "active",
+      created_at: "2026-03-01T00:00:00Z",
+    }),
+    makeMember({
+      id: 2,
+      remote_id: "u-2",
+      email: "2@x.com",
+      status: "active",
+      created_at: "2026-03-02T00:00:00Z",
+    }),
+    makeMember({
+      id: 3,
+      remote_id: "u-3",
+      email: "3@x.com",
+      status: "active",
+      created_at: "2026-03-03T00:00:00Z",
+    }),
+    makeMember({
+      id: 4,
+      remote_id: "u-4",
+      email: "4@x.com",
+      status: "active",
+      created_at: "2026-03-04T00:00:00Z",
+    }),
+    makeMember({
+      id: 5,
+      remote_id: "u-5",
+      email: "5@x.com",
+      status: "active",
+      created_at: "2026-03-05T00:00:00Z",
+    }),
+    makeMember({
+      id: 6,
+      remote_id: "u-6",
+      email: "6@x.com",
+      status: "active",
+      created_at: "2026-03-06T00:00:00Z",
+    }),
+    makeMember({
+      id: 77,
+      remote_id: "u-77",
+      email: "77@x.com",
+      status: "active",
+      created_at: null,
+    }),
   ];
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("77@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
-  expect(screen.getByText("6@x.com").closest("tr")).toHaveClass("member-overlimit-row");
+  expect(screen.getByText("77@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("5@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("6@x.com").closest("tr")).toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("uses remote_id tie-break when created_at is equal", () => {
   const sameDate = "2026-03-10T00:00:00Z";
   const members = [
-    makeMember({ id: 1, remote_id: "u-z", email: "z@x.com", created_at: sameDate }),
-    makeMember({ id: 2, remote_id: "u-a", email: "a@x.com", created_at: sameDate }),
-    makeMember({ id: 3, remote_id: "u-b", email: "b@x.com", created_at: sameDate }),
-    makeMember({ id: 4, remote_id: "u-c", email: "c@x.com", created_at: sameDate }),
-    makeMember({ id: 5, remote_id: "u-d", email: "d@x.com", created_at: sameDate }),
-    makeMember({ id: 6, remote_id: "u-e", email: "e@x.com", created_at: sameDate }),
+    makeMember({
+      id: 1,
+      remote_id: "u-z",
+      email: "z@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 2,
+      remote_id: "u-a",
+      email: "a@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 3,
+      remote_id: "u-b",
+      email: "b@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 4,
+      remote_id: "u-c",
+      email: "c@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 5,
+      remote_id: "u-d",
+      email: "d@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 6,
+      remote_id: "u-e",
+      email: "e@x.com",
+      created_at: sameDate,
+    }),
   ];
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("z@x.com").closest("tr")).toHaveClass("member-overlimit-row");
-  expect(screen.getByText("e@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+  expect(screen.getByText("z@x.com").closest("tr")).toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("e@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
 });
 
 it("uses id tie-break when created_at and remote_id are equal", () => {
   const sameDate = "2026-03-10T00:00:00Z";
   const members = [
-    makeMember({ id: 60, remote_id: null, email: "60@x.com", created_at: sameDate }),
-    makeMember({ id: 10, remote_id: null, email: "10@x.com", created_at: sameDate }),
-    makeMember({ id: 50, remote_id: null, email: "50@x.com", created_at: sameDate }),
-    makeMember({ id: 20, remote_id: null, email: "20@x.com", created_at: sameDate }),
-    makeMember({ id: 40, remote_id: null, email: "40@x.com", created_at: sameDate }),
-    makeMember({ id: 30, remote_id: null, email: "30@x.com", created_at: sameDate }),
+    makeMember({
+      id: 60,
+      remote_id: null,
+      email: "60@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 10,
+      remote_id: null,
+      email: "10@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 50,
+      remote_id: null,
+      email: "50@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 20,
+      remote_id: null,
+      email: "20@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 40,
+      remote_id: null,
+      email: "40@x.com",
+      created_at: sameDate,
+    }),
+    makeMember({
+      id: 30,
+      remote_id: null,
+      email: "30@x.com",
+      created_at: sameDate,
+    }),
   ];
 
   render(<MemberTable members={members} />);
 
-  expect(screen.getByText("60@x.com").closest("tr")).toHaveClass("member-overlimit-row");
-  expect(screen.getByText("30@x.com").closest("tr")).not.toHaveClass("member-overlimit-row");
+  expect(screen.getByText("60@x.com").closest("tr")).toHaveClass(
+    "member-overlimit-row",
+  );
+  expect(screen.getByText("30@x.com").closest("tr")).not.toHaveClass(
+    "member-overlimit-row",
+  );
 });
 ```
 
@@ -402,6 +614,7 @@ git commit -m "test(frontend): add over-limit member classification tests"
 ### Task 4: Implement minimal frontend over-limit classification
 
 **Files:**
+
 - Modify: `frontend/src/components/member-table.tsx`
 
 - [ ] **Step 1: Implement deterministic classification helper in component**
@@ -461,13 +674,14 @@ git commit -m "feat(frontend): highlight active members beyond oldest five"
 ### Task 5: Add minimal CSS for over-limit rows
 
 **Files:**
+
 - Modify: `frontend/src/app/globals.css`
 
 - [ ] **Step 1: Add warning row styles**
 
 ```css
 .data-table tbody tr.member-overlimit-row {
-  background: rgba(255, 125, 135, 0.10);
+  background: rgba(255, 125, 135, 0.1);
 }
 
 .data-table tbody tr.member-overlimit-row:hover {
@@ -493,6 +707,7 @@ git commit -m "style(frontend): add over-limit member row warning tone"
 ### Task 6: Run required backend + frontend test suites
 
 **Files:**
+
 - Test only (no file edits required)
 
 - [ ] **Step 1: Run backend targeted sync/date tests**
@@ -525,43 +740,52 @@ git commit -m "test: stabilize over-limit warning behavior"
 ### Task 7: Manual verification with existing workspaces
 
 **Files:**
+
 - No code changes required; dashboard and API verification
 
 - [ ] **Step 1: Re-sync each workspace in dashboard**
 
 Action:
+
 - Open dashboard.
 - Click Sync on `Mitrabisa` and `luluash`.
 
 Expected:
+
 - Sync succeeds for both workspaces.
 
 - [ ] **Step 2: Verify Date added backfill after sync**
 
 Action:
+
 - Call members API for both orgs and inspect `created_at`.
 
 Run examples:
+
 ```bash
 curl -s http://localhost:8000/api/workspaces/0a066ad8-c17d-457e-ab10-8e10a1b41c3c/members
 curl -s http://localhost:8000/api/workspaces/a5bf98fb-b077-4cd5-9c96-32645bde0cde/members
 ```
 
 Expected:
+
 - `created_at` populated from remote Date added (`created_time`) for active members.
 
 - [ ] **Step 3: Confirm baseline behavior at <=5 active**
 
 Expected:
+
 - `Mitrabisa` (2 active) -> no red rows.
 - `luluash` (5 active) -> no red rows.
 
 - [ ] **Step 4: Confirm >5 overflow behavior and unchanged kick/owner protection**
 
 Action:
+
 - Add an active member to a workspace already at 5, then sync.
 
 Expected:
+
 - Only 6th+ active member rows are red.
 - Kick still works on eligible member rows.
 - Owner row remains protected (still shows protected state and no kick action).
@@ -569,9 +793,11 @@ Expected:
 - [ ] **Step 5: Confirm transition back to <=5 clears warning**
 
 Action:
+
 - Kick one highlighted overflow member to return to 5 active members.
 
 Expected:
+
 - Red highlight clears for that workspace once active members are back to 5.
 
 - [ ] **Step 6: Final commit for any manual-fix changes**

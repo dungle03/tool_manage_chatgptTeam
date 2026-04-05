@@ -97,7 +97,6 @@ export async function kickUnauthorizedFinding(
 
 export async function importTeam(payload: {
   access_token?: string;
-  session_token?: string;
   org_id?: string;
   name?: string;
 }): Promise<WorkspaceImportResult> {

@@ -17,9 +17,6 @@ def test_accepted_invite_is_not_flagged_unauthorized(client, seed_data, monkeypa
     """When a pending invitee accepts and becomes a remote member,
     they should NOT be detected as unauthorized."""
 
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         # Remote now includes the invitee who accepted — they are a member
         return [
@@ -52,10 +49,6 @@ def test_accepted_invite_is_not_flagged_unauthorized(client, seed_data, monkeypa
         # No more pending invites — the invite was consumed when accepted
         return []
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members",
         fake_get_members,

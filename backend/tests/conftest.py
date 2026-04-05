@@ -39,7 +39,6 @@ def seed_data():
             account_id="acc_001",
             name="Team Alpha",
             access_token="test-access-token",
-            session_token="test-session-token",
             status="live",
             member_count=2,
             member_limit=7,

@@ -79,30 +79,9 @@ async def import_team(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
-    access_token = payload.access_token
-    session_token = payload.session_token
+    access_token = payload.access_token.strip()
 
-    if not access_token and not session_token:
-        raise HTTPException(
-            status_code=400,
-            detail="access_token or session_token is required",
-        )
-
-    if not access_token and session_token:
-        try:
-            refreshed = await chatgpt_service.refresh_access_token(
-                session_token,
-                payload.org_id,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"failed to refresh access token: {exc}",
-            ) from exc
-        access_token = str(refreshed["access_token"])
-        session_token = refreshed.get("session_token") or session_token
-
-    if access_token is None:
+    if not access_token:
         raise HTTPException(status_code=400, detail="access token is required")
 
     try:
@@ -145,7 +124,6 @@ async def import_team(
             existing.account_id = account_id
             existing.name = workspace_name
             existing.access_token = access_token
-            existing.session_token = session_token
             existing.status = "live"
             existing.sync_error = None
             existing.member_limit = int(
@@ -159,7 +137,6 @@ async def import_team(
                 account_id=account_id,
                 name=workspace_name,
                 access_token=access_token,
-                session_token=session_token,
                 status="live",
                 sync_error=None,
                 member_count=0,
@@ -525,28 +502,12 @@ async def rename_workspace(
         )
 
     access_token = workspace.access_token
-    session_token = workspace.session_token
 
-    if not access_token and not session_token:
+    if not access_token:
         raise HTTPException(
             status_code=400,
-            detail="workspace does not have an access token or session token",
+            detail="workspace does not have an access token",
         )
-
-    if not access_token and session_token:
-        try:
-            refreshed = await chatgpt_service.refresh_access_token(
-                session_token,
-                workspace.account_id or workspace.org_id,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"failed to refresh access token: {exc}",
-            ) from exc
-        access_token = refreshed["access_token"]
-        workspace.access_token = access_token
-        workspace.session_token = refreshed.get("session_token") or session_token
 
     if access_token is None:
         raise HTTPException(

@@ -5,16 +5,16 @@
 Build a web dashboard to manage multiple ChatGPT Team workspaces,
 including:
 
--   View workspace members
--   Invite new members
--   Remove members
--   View pending invites
--   Track workspace capacity
--   Manage multiple workspaces in one dashboard
+- View workspace members
+- Invite new members
+- Remove members
+- View pending invites
+- Track workspace capacity
+- Manage multiple workspaces in one dashboard
 
 The tool will interact with ChatGPT internal workspace APIs.
 
-------------------------------------------------------------------------
+---
 
 # 2. System Architecture
 
@@ -38,42 +38,44 @@ Backend API\
 ↓\
 ChatGPT Internal API
 
-------------------------------------------------------------------------
+---
 
 # 3. Core Features
 
 ## Workspace Management
 
--   List all workspaces
--   Show workspace capacity (members / limit)
--   Show workspace status
+- List all workspaces
+- Show workspace capacity (members / limit)
+- Show workspace status
 
 Example
 
-  Workspace Name   Members   Capacity
-  ---------------- --------- ----------
-  Workspace A      4         7
-  Workspace B      5         7
+Workspace Name Members Capacity
 
-------------------------------------------------------------------------
+---
+
+Workspace A 4 7
+Workspace B 5 7
+
+---
 
 ## Member Management
 
 Features
 
--   List members
--   Show role (Owner / Member)
--   Show invite date
--   Remove member
--   Approve invite
+- List members
+- Show role (Owner / Member)
+- Show invite date
+- Remove member
+- Approve invite
 
 Fields
 
--   Email
--   Account Name
--   Role
--   Invite Date
--   Status
+- Email
+- Account Name
+- Role
+- Invite Date
+- Status
 
 Status Types
 
@@ -81,7 +83,7 @@ active\
 pending\
 invited
 
-------------------------------------------------------------------------
+---
 
 ## Invite System
 
@@ -95,7 +97,7 @@ View pending invites\
 Resend invite\
 Cancel invite
 
-------------------------------------------------------------------------
+---
 
 ## Redeem Code System (Optional)
 
@@ -119,7 +121,7 @@ used\
 used_by\
 expire_time
 
-------------------------------------------------------------------------
+---
 
 # 4. ChatGPT Internal APIs
 
@@ -138,7 +140,7 @@ Fields
 id\
 name
 
-------------------------------------------------------------------------
+---
 
 ## Get Members
 
@@ -157,7 +159,7 @@ name\
 role\
 status
 
-------------------------------------------------------------------------
+---
 
 ## Invite Member
 
@@ -170,7 +172,7 @@ Body
 email\
 role
 
-------------------------------------------------------------------------
+---
 
 ## Remove Member
 
@@ -178,7 +180,7 @@ DELETE
 
 /backend-api/organizations/{org_id}/members/{member_id}
 
-------------------------------------------------------------------------
+---
 
 ## List Invites
 
@@ -186,29 +188,17 @@ GET
 
 /backend-api/organizations/{org_id}/invites
 
-------------------------------------------------------------------------
+---
 
 # 5. Authentication
 
-Use ChatGPT session token.
-
-Sources
-
-https://chatgpt.com/api/auth/session
-
-Token fields
-
-accessToken
-
-Or use cookie
-
-\_\_Secure-next-auth.session-token
+Use ChatGPT access token.
 
 Headers
 
 Authorization: Bearer `<token>`{=html}
 
-------------------------------------------------------------------------
+---
 
 # 6. Database Design
 
@@ -224,7 +214,7 @@ name\
 member_limit\
 created_at
 
-------------------------------------------------------------------------
+---
 
 ## members
 
@@ -236,7 +226,7 @@ role\
 status\
 invite_date
 
-------------------------------------------------------------------------
+---
 
 ## invites
 
@@ -247,7 +237,7 @@ invite_id\
 status\
 created_at
 
-------------------------------------------------------------------------
+---
 
 ## redeem_codes
 
@@ -257,7 +247,7 @@ used\
 used_by\
 expire_time
 
-------------------------------------------------------------------------
+---
 
 # 7. Backend API Design
 
@@ -266,14 +256,14 @@ expire_time
 GET /api/workspaces\
 GET /api/workspaces/{id}/members
 
-------------------------------------------------------------------------
+---
 
 ## Members
 
 POST /api/invite\
 DELETE /api/member
 
-------------------------------------------------------------------------
+---
 
 ## Invites
 
@@ -281,7 +271,7 @@ GET /api/invites\
 POST /api/resend-invite\
 DELETE /api/cancel-invite
 
-------------------------------------------------------------------------
+---
 
 # 8. Frontend UI Pages
 
@@ -293,7 +283,7 @@ Workspace cards\
 Member usage\
 Status indicator
 
-------------------------------------------------------------------------
+---
 
 ## Workspace Detail Page
 
@@ -307,7 +297,7 @@ Invite\
 Remove\
 Approve
 
-------------------------------------------------------------------------
+---
 
 ## Invite Modal
 
@@ -320,7 +310,7 @@ Buttons
 Send Invite\
 Bulk Invite
 
-------------------------------------------------------------------------
+---
 
 # 9. UI Components
 
@@ -330,7 +320,7 @@ Invite Modal\
 Redeem Code Panel\
 Admin Settings
 
-------------------------------------------------------------------------
+---
 
 # 10. Background Jobs
 
@@ -341,7 +331,7 @@ Optional
 Auto remove inactive members\
 Auto resend failed invites
 
-------------------------------------------------------------------------
+---
 
 # 11. Tech Stack
 
@@ -363,7 +353,7 @@ Cache
 
 Redis (optional)
 
-------------------------------------------------------------------------
+---
 
 # 12. Security Considerations
 
@@ -375,9 +365,9 @@ Admin login\
 API rate limits\
 Token encryption
 
-Never expose ChatGPT session tokens publicly.
+Never expose ChatGPT access tokens publicly.
 
-------------------------------------------------------------------------
+---
 
 # 13. Deployment
 
@@ -393,7 +383,7 @@ Example
 
 docker compose up -d
 
-------------------------------------------------------------------------
+---
 
 # 14. Estimated Development Time
 
@@ -410,7 +400,7 @@ Total
 
 \~12 hours
 
-------------------------------------------------------------------------
+---
 
 # 15. Future Improvements
 
@@ -422,6 +412,6 @@ Add billing / slot tracking
 
 Add Telegram / Discord notification
 
-------------------------------------------------------------------------
+---
 
 END

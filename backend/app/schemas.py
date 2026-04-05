@@ -76,8 +76,7 @@ class KickMemberRequest(BaseModel):
 
 
 class WorkspaceImportRequest(BaseModel):
-    access_token: str | None = None
-    session_token: str | None = None
+    access_token: str
     org_id: str | None = None
     name: str | None = None
 

@@ -2,9 +2,6 @@ from app.main import app
 
 
 def test_invite_then_list_invites(client, seed_data, monkeypatch):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     captured_send = {}
 
     async def fake_send_invite(
@@ -14,10 +11,6 @@ def test_invite_then_list_invites(client, seed_data, monkeypatch):
         captured_send["resend_emails"] = resend_emails
         return {"id": "inv_remote_created"}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )
@@ -52,19 +45,12 @@ def test_invite_uses_existing_pending_invite_without_creating_duplicate(
 ):
     sent_calls = []
 
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_send_invite(
         _self, _access_token, _account_id, _email, resend_emails=True
     ):
         sent_calls.append({"email": _email, "resend_emails": resend_emails})
         return {"id": "inv_should_not_happen"}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )
@@ -86,9 +72,6 @@ def test_invite_uses_existing_pending_invite_without_creating_duplicate(
 def test_invite_uses_remote_listing_when_create_response_has_no_id(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     captured_send = {}
 
     async def fake_send_invite(
@@ -108,10 +91,6 @@ def test_invite_uses_remote_listing_when_create_response_has_no_id(
             },
         ]
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )

@@ -3,9 +3,6 @@ from app.models import Member, UnauthorizedFinding, Workspace
 
 
 def test_existing_local_member_is_whitelisted_on_sync(client, seed_data, monkeypatch):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -27,10 +24,6 @@ def test_existing_local_member_is_whitelisted_on_sync(client, seed_data, monkeyp
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members",
         fake_get_members,
@@ -57,9 +50,6 @@ def test_existing_local_member_is_whitelisted_on_sync(client, seed_data, monkeyp
 def test_auto_kick_detects_and_removes_truly_unauthorized_member(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -87,10 +77,6 @@ def test_auto_kick_detects_and_removes_truly_unauthorized_member(
         delete_calls.append((_account_id, _user_id))
         return {"ok": True}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members",
         fake_get_members,

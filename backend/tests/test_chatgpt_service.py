@@ -114,37 +114,6 @@ def test_send_invite_sets_auth_and_account_headers(monkeypatch):
     assert captured["json_data"]["resend_emails"] is False
 
 
-def test_refresh_access_token_uses_session_cookie(monkeypatch):
-    service = ChatGPTService()
-    captured = {}
-
-    async def fake_request(
-        method, path, headers=None, json_data=None, cookies=None, use_base_url=True
-    ):
-        captured["method"] = method
-        captured["path"] = path
-        captured["cookies"] = cookies
-        captured["use_base_url"] = use_base_url
-        return {
-            "success": True,
-            "data": {
-                "accessToken": "new-access-token",
-                "sessionToken": "new-session-token",
-            },
-        }
-
-    monkeypatch.setattr(service, "_request", fake_request)
-
-    refreshed = asyncio.run(service.refresh_access_token("session-token", "acc_123"))
-
-    assert captured["method"] == "GET"
-    assert "exchange_workspace_token=true" in captured["path"]
-    assert "workspace_id=acc_123" in captured["path"]
-    assert captured["cookies"]["__Secure-next-auth.session-token"] == "session-token"
-    assert captured["use_base_url"] is False
-    assert refreshed["access_token"] == "new-access-token"
-
-
 def test_request_retries_on_server_error(monkeypatch):
     service = ChatGPTService()
     fake_session = _FakeAsyncSession(

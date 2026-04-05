@@ -129,35 +129,6 @@ class ChatGPTService:
 
         return {"success": False, "error": "unknown error", "status_code": 0}
 
-    async def refresh_access_token(
-        self,
-        session_token: str,
-        account_id: str | None = None,
-    ) -> dict[str, str]:
-        url = "https://chatgpt.com/api/auth/session"
-        if account_id:
-            url += f"?exchange_workspace_token=true&workspace_id={account_id}"
-
-        result = await self._request(
-            "GET",
-            url,
-            headers=self._build_headers(extra={"Accept": "application/json"}),
-            cookies={"__Secure-next-auth.session-token": session_token},
-            use_base_url=False,
-        )
-        if not result["success"]:
-            raise RuntimeError(result.get("error", "failed to refresh access token"))
-
-        payload = result["data"]
-        access_token = payload.get("accessToken")
-        if not access_token:
-            raise RuntimeError("accessToken missing from refresh response")
-
-        return {
-            "access_token": access_token,
-            "session_token": payload.get("sessionToken") or session_token,
-        }
-
     async def get_account_info(self, access_token: str) -> list[dict[str, Any]]:
         result = await self._request(
             "GET",

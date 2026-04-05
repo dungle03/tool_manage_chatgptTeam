@@ -23,7 +23,7 @@ Repository này được xây dựng cho người vận hành nhiều workspace 
 ## Tính năng chính
 
 ### Quản lý workspace
-- Import workspace bằng `access_token` hoặc `session_token`
+- Import workspace bằng `access_token`
 - Hiển thị toàn bộ workspace trong một dashboard thống nhất
 - Hiển thị số ghế đã dùng, tình trạng sync, ngày hết hạn và trạng thái hot-sync
 - Xóa workspace khỏi danh sách quản lý cục bộ

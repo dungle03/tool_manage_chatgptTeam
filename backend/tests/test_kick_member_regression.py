@@ -12,16 +12,9 @@ def test_kick_member_blocks_owner(client, seed_data):
 def test_kick_member_upstream_failure_keeps_local_member(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_delete_member(_self, _access_token, _account_id, _user_id):
         raise RuntimeError("upstream delete failed")
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.delete_member",
         fake_delete_member,
@@ -48,16 +41,9 @@ def test_kick_member_upstream_failure_keeps_local_member(
 def test_manual_kick_unauthorized_member_marks_finding_kicked(
     client, seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_delete_member(_self, _access_token, _account_id, _user_id):
         return {"ok": True}
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.delete_member",
         fake_delete_member,

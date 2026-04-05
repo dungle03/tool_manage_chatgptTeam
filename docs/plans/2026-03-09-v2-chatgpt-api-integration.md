@@ -31,9 +31,7 @@ Base URL: `https://chatgpt.com/backend-api`
 ### 2.1 Authentication
 
 ```
-GET https://chatgpt.com/api/auth/session
-Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
-→ Returns: { accessToken, sessionToken }
+Authorization: Bearer <ACCESS_TOKEN>
 ```
 
 ### 2.2 Get Account Info (tìm Team workspace)
@@ -90,11 +88,11 @@ Authorization: Bearer <ACCESS_TOKEN>
 chatgpt-account-id: <account_id>
 ```
 
-### 2.8 Refresh Token
+### 2.8 Token Refresh
 
 ```
-GET https://chatgpt.com/api/auth/session?exchange_workspace_token=true&workspace_id={account_id}
-Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
+Không còn hỗ trợ refresh token tự động.
+Cần cập nhật access token mới khi token hết hạn.
 ```
 
 ---
@@ -171,7 +169,7 @@ Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
 ### Backend cần thay đổi:
 
 1. **`chatgpt_service.py`** (MỚI) — Gọi ChatGPT API, xử lý token, retry
-2. **`models.py`** — Thêm fields: `access_token`, `session_token`, `account_id`, `last_sync`
+2. **`models.py`** — Thêm fields: `access_token`, `account_id`, `last_sync`
 3. **`routers/`** — Sửa endpoints: gọi ChatGPT API thay vì CRUD local
 4. **`auth.py`** — Giữ admin auth cho dashboard
 
@@ -194,7 +192,6 @@ Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
   - Session pool (per account_id)
   - Proxy support (optional)
 - [ ] Implement các method:
-  - `refresh_token(session_token) → access_token`
   - `get_account_info(access_token) → team accounts`
   - `get_members(access_token, account_id) → members[]`
   - `get_invites(access_token, account_id) → invites[]`
@@ -209,7 +206,7 @@ Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
 **Tasks:**
 
 - [ ] Update `models.py`:
-  - `Team` model: `account_id`, `name`, `access_token`, `session_token`, `status`, `member_count`, `member_limit`, `last_sync`, `expires_at`
+  - `Team` model: `account_id`, `name`, `access_token`, `status`, `member_count`, `member_limit`, `last_sync`, `expires_at`
 - [ ] Sửa routers:
   - `GET /api/teams` → list teams from DB (cached)
   - `POST /api/teams/import` → import AT token, auto-detect team info
@@ -256,18 +253,11 @@ Cookie: __Secure-next-auth.session-token=<SESSION_TOKEN>
 
 Trước khi code, cần anh cung cấp:
 
-| Thông tin                               | Cần?        | Ghi chú                                                           |
-| --------------------------------------- | ----------- | ----------------------------------------------------------------- |
-| **Session Token** hoặc **Access Token** | ✅ BẮT BUỘC | Lấy từ cookie `__Secure-next-auth.session-token` trên chatgpt.com |
-| **Proxy** (nếu cần)                     | ⚠️ Optional | HTTP/SOCKS5 proxy URL nếu bị block                                |
-| Triển khai ở đâu?                       | 📝 Later    | Local dev trước, Docker sau                                       |
-
-### Cách lấy Session Token:
-
-1. Mở https://chatgpt.com và đăng nhập
-2. F12 → Application → Cookies → chatgpt.com
-3. Copy giá trị `__Secure-next-auth.session-token`
-4. Dán vào file `.env`: `SESSION_TOKEN=eyJhbGci...`
+| Thông tin           | Cần?        | Ghi chú                                    |
+| ------------------- | ----------- | ------------------------------------------ |
+| **Access Token**    | ✅ BẮT BUỘC | Dùng để gọi ChatGPT internal API trực tiếp |
+| **Proxy** (nếu cần) | ⚠️ Optional | HTTP/SOCKS5 proxy URL nếu bị block         |
+| Triển khai ở đâu?   | 📝 Later    | Local dev trước, Docker sau                |
 
 ---
 
@@ -305,5 +295,5 @@ cryptography       # Encrypt stored tokens
 | -------------------- | ------------- | ---------------------------------------- |
 | ChatGPT API thay đổi | 🟡 Trung bình | Theo dõi reference repo updates          |
 | Cloudflare block     | 🔴 Cao        | Dùng `curl-cffi` với browser fingerprint |
-| Token hết hạn        | 🟡 Trung bình | Auto-refresh bằng session_token          |
+| Token hết hạn        | 🟡 Trung bình | Yêu cầu cập nhật access_token mới        |
 | Rate limit           | 🟡 Trung bình | Retry + exponential backoff              |

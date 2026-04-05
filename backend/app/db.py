@@ -70,7 +70,6 @@ def _migrate_add_missing_columns() -> None:
             new_cols = {
                 "account_id": "VARCHAR",
                 "access_token": "TEXT",
-                "session_token": "TEXT",
                 "status": "VARCHAR DEFAULT 'live'",
                 "sync_error": "TEXT",
                 "member_count": "INTEGER DEFAULT 0",

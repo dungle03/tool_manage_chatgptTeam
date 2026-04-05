@@ -67,9 +67,6 @@ def test_sync_workspace_data_updates_workspace_and_emits_event(seed_data, monkey
         events.append(event)
         return event
 
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -93,10 +90,6 @@ def test_sync_workspace_data_updates_workspace_and_emits_event(seed_data, monkey
 
     monkeypatch.setattr(
         "app.services.events.workspace_event_broker.publish", capture_publish
-    )
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
     )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
@@ -218,9 +211,6 @@ def test_pick_due_workspaces_prioritizes_hot_and_pending(seed_data):
 def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     scheduled: list[dict[str, str]] = []
 
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_send_invite(
         _self, _access_token, _account_id, _email, resend_emails=True
     ):
@@ -237,10 +227,6 @@ def test_invite_route_schedules_followup(client, seed_data, monkeypatch):
     ):
         scheduled.append({"org_id": workspace.org_id, "reason": reason})
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.send_invite", fake_send_invite
     )
@@ -289,9 +275,6 @@ def test_sync_workspace_endpoint_returns_ok_when_sync_already_running(
 def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote(
     seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return []
 
@@ -305,10 +288,6 @@ def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote
             }
         ]
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
     )
@@ -346,9 +325,6 @@ def test_sync_workspace_data_preserves_local_pending_invites_missing_from_remote
 def test_sync_workspace_data_removes_pending_invite_when_member_exists(
     seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return [
             {
@@ -363,10 +339,6 @@ def test_sync_workspace_data_removes_pending_invite_when_member_exists(
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
     )
@@ -507,19 +479,12 @@ def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
 def test_sync_workspace_data_persists_error_state_after_commit_failure(
     seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return []
 
     async def fake_get_invites(_self, _access_token, _account_id):
         return []
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
     )
@@ -574,19 +539,12 @@ def test_workspace_events_path_is_registered_in_openapi():
 def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(
     seed_data, monkeypatch
 ):
-    async def fake_refresh_access_token(_self, _session_token, _account_id=None):
-        return {"access_token": "fresh-token", "session_token": _session_token}
-
     async def fake_get_members(_self, _access_token, _account_id):
         return []
 
     async def fake_get_invites(_self, _access_token, _account_id):
         raise RuntimeError("account_deactivated")
 
-    monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.refresh_access_token",
-        fake_refresh_access_token,
-    )
     monkeypatch.setattr(
         "app.services.chatgpt.ChatGPTService.get_members", fake_get_members
     )

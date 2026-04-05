@@ -16,7 +16,6 @@ class Workspace(Base):
     account_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     name: Mapped[str] = mapped_column(String)
     access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
-    session_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="live")
     sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     member_count: Mapped[int] = mapped_column(Integer, default=0)
