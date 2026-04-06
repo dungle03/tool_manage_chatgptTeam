@@ -1,3 +1,6 @@
+import asyncio
+import contextlib
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,7 +8,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import verify_admin_token
-from app.db import get_session
+from app.db import SessionLocal, get_session
 from app.models import Invite, Member, UnauthorizedFinding, Workspace
 from app.schemas import (
     UnauthorizedFindingActionRequest,
@@ -15,6 +18,16 @@ from app.schemas import (
     WorkspaceTokenUpdateRequest,
 )
 from app.services.chatgpt import chatgpt_service
+from app.services.token_refresher import (
+    TokenRefreshError,
+    get_workspace_token_refresh_lock,
+    is_workspace_token_refresh_in_progress,
+    mark_workspace_refresh_failure,
+    mark_workspace_refresh_success,
+    run_token_refresher_for_workspace,
+    verify_refreshed_token_for_workspace,
+)
+from app.services.events import workspace_event_broker
 from app.services.workspace_sync import (
     build_action_response,
     build_refresh_hint,
@@ -31,6 +44,8 @@ from app.services.workspace_sync import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_WORKSPACE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
 # Backward-compatible alias used by existing tests.
@@ -111,17 +126,18 @@ async def import_team(
     imported_workspaces: list[Workspace] = []
     for info in accounts:
         account_id = str(info.get("account_id") or "")
-        if not account_id:
+        workspace_org_id = str(info.get("org_id") or account_id or payload.org_id or "")
+        if not workspace_org_id:
             continue
 
         existing = session.execute(
-            select(Workspace).where(Workspace.org_id == account_id)
+            select(Workspace).where(Workspace.org_id == workspace_org_id)
         ).scalar_one_or_none()
 
-        workspace_name = str(info.get("name") or account_id)
+        workspace_name = str(info.get("name") or workspace_org_id)
 
         if existing:
-            existing.account_id = account_id
+            existing.account_id = account_id or existing.account_id
             existing.name = workspace_name
             existing.access_token = access_token
             existing.status = "live"
@@ -133,8 +149,8 @@ async def import_team(
             workspace = existing
         else:
             workspace = Workspace(
-                org_id=account_id,
-                account_id=account_id,
+                org_id=workspace_org_id,
+                account_id=account_id or None,
                 name=workspace_name,
                 access_token=access_token,
                 status="live",
@@ -595,6 +611,9 @@ async def update_workspace_token(
     workspace.access_token = access_token
     workspace.status = "live"
     workspace.sync_error = None
+    workspace.last_token_refresh_error = None
+    workspace.token_refresh_fail_count = 0
+    workspace.token_refresh_blocked = False
     session.commit()
     session.refresh(workspace)
 
@@ -609,6 +628,195 @@ async def update_workspace_token(
             include_details=False,
         ),
     )
+
+
+def _track_workspace_refresh_task(org_id: str, task: asyncio.Task[None]) -> None:
+    _WORKSPACE_REFRESH_TASKS[org_id] = task
+
+    def _cleanup(completed_task: asyncio.Task[None]) -> None:
+        current_task = _WORKSPACE_REFRESH_TASKS.get(org_id)
+        if current_task is completed_task:
+            _WORKSPACE_REFRESH_TASKS.pop(org_id, None)
+        with contextlib.suppress(asyncio.CancelledError):
+            exc = completed_task.exception()
+            if exc is not None:
+                logger.exception(
+                    "Background workspace token refresh task crashed for workspace=%s",
+                    org_id,
+                    exc_info=exc,
+                )
+
+    task.add_done_callback(_cleanup)
+
+
+async def _run_workspace_token_refresh_job(org_id: str) -> None:
+    session = SessionLocal()
+    try:
+        workspace = session.execute(
+            select(Workspace).where(Workspace.org_id == org_id)
+        ).scalar_one_or_none()
+        if workspace is None:
+            logger.warning(
+                "background refresh-token workspace not found for workspace=%s", org_id
+            )
+            return
+
+        refresh_lock = get_workspace_token_refresh_lock(workspace.org_id)
+        async with refresh_lock:
+            logger.info(
+                "background refresh-token started for workspace=%s", workspace.org_id
+            )
+            try:
+                refresh_result = await run_token_refresher_for_workspace(
+                    session, workspace, mode="manual"
+                )
+                verified_result = await verify_refreshed_token_for_workspace(
+                    workspace, refresh_result
+                )
+                mark_workspace_refresh_success(workspace, verified_result)
+                session.commit()
+                session.refresh(workspace)
+                workspace_event_broker.publish(
+                    "workspace_token_refreshed",
+                    org_id=workspace.org_id,
+                    trigger="manual",
+                    summary=workspace_to_dict(workspace, session),
+                )
+            except TokenRefreshError as exc:
+                logger.warning(
+                    "background refresh-token failed for workspace=%s detail=%s",
+                    org_id,
+                    exc.message,
+                )
+                session.rollback()
+                managed_workspace = session.execute(
+                    select(Workspace).where(Workspace.org_id == org_id)
+                ).scalar_one_or_none()
+                if managed_workspace is not None:
+                    mark_workspace_refresh_failure(
+                        managed_workspace,
+                        exc.message,
+                        mode="manual",
+                    )
+                    session.commit()
+                    session.refresh(managed_workspace)
+                    workspace_event_broker.publish(
+                        "workspace_token_refresh_failed",
+                        org_id=managed_workspace.org_id,
+                        trigger="manual",
+                        summary=workspace_to_dict(managed_workspace, session),
+                        error={"message": exc.message},
+                    )
+                return
+
+            try:
+                await sync_workspace_data(
+                    session,
+                    workspace,
+                    trigger="manual",
+                    publish_events=True,
+                )
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                logger.warning(
+                    "background refresh-token sync failed for workspace=%s detail=%s",
+                    org_id,
+                    detail,
+                )
+                session.rollback()
+            finally:
+                with contextlib.suppress(Exception):
+                    session.refresh(workspace)
+    finally:
+        session.close()
+
+
+@router.post("/api/workspaces/{id}/refresh-token")
+async def refresh_workspace_token(
+    id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    logger.info("refresh-token request received for workspace=%s", id)
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        logger.warning("refresh-token workspace not found for workspace=%s", id)
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    logger.info(
+        "refresh-token workspace resolved for workspace=%s status=%s",
+        workspace.org_id,
+        workspace.status,
+    )
+
+    existing_task = _WORKSPACE_REFRESH_TASKS.get(workspace.org_id)
+    if existing_task is not None and not existing_task.done():
+        logger.info(
+            "refresh-token background task already tracked for workspace=%s",
+            workspace.org_id,
+        )
+        return {
+            "ok": True,
+            "action": "workspace_token_refresh",
+            "status": "in_progress",
+            "message": "Workspace đang được refresh token",
+            "workspace_id": workspace.org_id,
+            "token_updated": False,
+            "sync_completed": False,
+            "already_in_progress": True,
+            "updated_summary": workspace_to_dict(workspace, session),
+            "refresh_hint": build_refresh_hint(
+                scope="workspace_detail",
+                org_id=workspace.org_id,
+                reason="workspace_token_refresh_in_progress",
+                include_details=True,
+            ),
+        }
+
+    if is_workspace_token_refresh_in_progress(workspace.org_id):
+        logger.info(
+            "refresh-token already in progress for workspace=%s", workspace.org_id
+        )
+        return {
+            "ok": True,
+            "action": "workspace_token_refresh",
+            "status": "in_progress",
+            "message": "Workspace đang được refresh token",
+            "workspace_id": workspace.org_id,
+            "token_updated": False,
+            "sync_completed": False,
+            "already_in_progress": True,
+            "updated_summary": workspace_to_dict(workspace, session),
+            "refresh_hint": build_refresh_hint(
+                scope="workspace_detail",
+                org_id=workspace.org_id,
+                reason="workspace_token_refresh_in_progress",
+                include_details=True,
+            ),
+        }
+
+    task = asyncio.create_task(_run_workspace_token_refresh_job(workspace.org_id))
+    _track_workspace_refresh_task(workspace.org_id, task)
+    logger.info("refresh-token background task scheduled for workspace=%s", id)
+    return {
+        "ok": True,
+        "action": "workspace_token_refresh",
+        "status": "accepted",
+        "message": "Đã đưa yêu cầu refresh token vào hàng đợi xử lý nền",
+        "workspace_id": workspace.org_id,
+        "token_updated": False,
+        "sync_completed": False,
+        "already_in_progress": False,
+        "updated_summary": workspace_to_dict(workspace, session),
+        "refresh_hint": build_refresh_hint(
+            scope="workspace_detail",
+            org_id=workspace.org_id,
+            reason="workspace_token_refresh_started",
+            include_details=True,
+        ),
+    }
 
 
 @router.delete("/api/workspaces/{id}")

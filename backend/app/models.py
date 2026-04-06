@@ -33,6 +33,12 @@ class Workspace(Base):
     unauthorized_last_detected_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+    last_token_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    last_token_refresh_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_refresh_fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    token_refresh_blocked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

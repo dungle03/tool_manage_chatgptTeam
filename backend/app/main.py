@@ -1,6 +1,8 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +12,10 @@ from app.services.workspace_sync import (
     start_background_sync_worker,
     stop_background_sync_worker,
 )
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env")
+load_dotenv(_PROJECT_ROOT / "backend" / ".env")
 
 
 @asynccontextmanager

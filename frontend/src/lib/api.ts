@@ -12,6 +12,7 @@ import type {
   WorkspacePolicyUpdateResult,
   WorkspaceRenameResult,
   WorkspaceSyncResult,
+  WorkspaceTokenRefreshResult,
   WorkspaceTokenUpdateResult,
   UnauthorizedMemberMode,
 } from "@/types/api";
@@ -135,6 +136,10 @@ export async function updateWorkspaceToken(orgId: string, accessToken: string): 
   return requestJson<WorkspaceTokenUpdateResult>(`/api/workspaces/${orgId}/token`, "PATCH", {
     access_token: accessToken,
   });
+}
+
+export async function refreshWorkspaceToken(orgId: string): Promise<WorkspaceTokenRefreshResult> {
+  return requestJson<WorkspaceTokenRefreshResult>(`/api/workspaces/${orgId}/refresh-token`, "POST");
 }
 
 export function invalidateApiCache() {

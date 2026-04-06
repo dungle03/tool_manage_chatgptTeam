@@ -196,8 +196,8 @@ function WorkspaceCardComponent({
             }}
             className="btn btn-secondary btn-compact workspace-sync-btn"
             id={`workspace-token-${orgId}`}
-            aria-label={`Cập nhật token cho workspace ${title}`}
-            title="Cập nhật token"
+            aria-label={`Refresh token cho workspace ${title}`}
+            title="Refresh token"
           >
             <span className="sync-icon" aria-hidden="true">
               <svg
@@ -215,7 +215,7 @@ function WorkspaceCardComponent({
                 <path d="M15.55 10v1.55" />
               </svg>
             </span>
-            <span className="workspace-sync-label">Token</span>
+            <span className="workspace-sync-label">Refresh Token</span>
           </button>
           <button
             onClick={(e) => {

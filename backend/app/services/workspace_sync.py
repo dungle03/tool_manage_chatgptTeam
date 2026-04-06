@@ -12,6 +12,16 @@ from sqlalchemy.orm import Session
 from app.models import Invite, Member, UnauthorizedFinding, Workspace
 from app.services.chatgpt import chatgpt_service
 from app.services.events import workspace_event_broker
+from app.services.token_refresher import (
+    TokenRefreshError,
+    get_workspace_token_refresh_lock,
+    is_workspace_token_refresh_in_progress,
+    mark_workspace_refresh_failure,
+    mark_workspace_refresh_success,
+    run_token_refresher_for_workspace,
+    select_due_token_refresh_workspace_ids,
+    verify_refreshed_token_for_workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +36,12 @@ SYNC_BASELINE_MINUTES = int(os.getenv("SYNC_BASELINE_MINUTES", str(SYNC_STALE_MI
 SYNC_HOT_WINDOW_SECONDS = int(os.getenv("SYNC_HOT_WINDOW_SECONDS", "180"))
 SYNC_MAX_PARALLEL_WORKSPACES = max(
     1, int(os.getenv("SYNC_MAX_PARALLEL_WORKSPACES", "2"))
+)
+TOKEN_AUTO_REFRESH_MAX_PARALLEL = max(
+    1, int(os.getenv("TOKEN_AUTO_REFRESH_MAX_PARALLEL", "3"))
+)
+TOKEN_AUTO_REFRESH_BATCH_DELAY_SECONDS = max(
+    0, int(os.getenv("TOKEN_AUTO_REFRESH_BATCH_DELAY_SECONDS", "60"))
 )
 
 
@@ -763,6 +779,10 @@ def workspace_to_dict(
         "sync_reason": workspace.sync_reason,
         "sync_priority": workspace.sync_priority,
         "is_hot": is_hot,
+        "last_token_refresh_at": serialize_datetime(workspace.last_token_refresh_at),
+        "last_token_refresh_error": workspace.last_token_refresh_error,
+        "token_refresh_fail_count": int(workspace.token_refresh_fail_count or 0),
+        "token_refresh_blocked": bool(workspace.token_refresh_blocked),
     }
 
 
@@ -931,6 +951,10 @@ def workspace_to_dict(
         "sync_reason": workspace.sync_reason,
         "sync_priority": workspace.sync_priority,
         "is_hot": is_hot,
+        "last_token_refresh_at": serialize_datetime(workspace.last_token_refresh_at),
+        "last_token_refresh_error": workspace.last_token_refresh_error,
+        "token_refresh_fail_count": int(workspace.token_refresh_fail_count or 0),
+        "token_refresh_blocked": bool(workspace.token_refresh_blocked),
     }
 
 
@@ -1453,11 +1477,89 @@ async def run_sync_cycle(session_factory: Any) -> None:
     await asyncio.gather(*(sync_one(org_id) for org_id in due_ids))
 
 
+async def run_token_refresh_cycle(session_factory: Any) -> None:
+    session = session_factory()
+    try:
+        due_ids = select_due_token_refresh_workspace_ids(session)
+    finally:
+        session.close()
+
+    if not due_ids:
+        return
+
+    async def refresh_one(org_id: str) -> None:
+        refresh_lock = get_workspace_token_refresh_lock(org_id)
+        if refresh_lock.locked() or is_workspace_sync_in_progress(org_id):
+            return
+
+        async with refresh_lock:
+            session = session_factory()
+            try:
+                workspace = session.execute(
+                    select(Workspace).where(Workspace.org_id == org_id)
+                ).scalar_one_or_none()
+                if workspace is None:
+                    return
+                try:
+                    refresh_result = await run_token_refresher_for_workspace(
+                        session,
+                        workspace,
+                        mode="auto",
+                    )
+                    verified_result = await verify_refreshed_token_for_workspace(
+                        workspace, refresh_result
+                    )
+                    mark_workspace_refresh_success(workspace, verified_result)
+                    session.commit()
+                    session.refresh(workspace)
+                except TokenRefreshError as exc:
+                    session.rollback()
+                    managed_workspace = session.execute(
+                        select(Workspace).where(Workspace.org_id == org_id)
+                    ).scalar_one_or_none()
+                    if managed_workspace is not None:
+                        mark_workspace_refresh_failure(
+                            managed_workspace,
+                            exc.message,
+                            mode="auto",
+                        )
+                        session.commit()
+                    logger.warning(
+                        "Auto token refresh failed for workspace %s: %s",
+                        org_id,
+                        exc.message,
+                    )
+                    return
+
+                try:
+                    await sync_workspace_data(
+                        session,
+                        workspace,
+                        trigger="auto",
+                        publish_events=True,
+                    )
+                except HTTPException as exc:
+                    logger.warning(
+                        "Auto token refresh sync follow-up failed for workspace %s: %s",
+                        org_id,
+                        exc.detail,
+                    )
+            finally:
+                session.close()
+
+    for batch_start in range(0, len(due_ids), TOKEN_AUTO_REFRESH_MAX_PARALLEL):
+        batch_ids = due_ids[batch_start : batch_start + TOKEN_AUTO_REFRESH_MAX_PARALLEL]
+        await asyncio.gather(*(refresh_one(org_id) for org_id in batch_ids))
+        if batch_start + TOKEN_AUTO_REFRESH_MAX_PARALLEL < len(due_ids):
+            await asyncio.sleep(TOKEN_AUTO_REFRESH_BATCH_DELAY_SECONDS)
+
+
 async def _background_sync_loop(
     session_factory: Any, stop_event: asyncio.Event
 ) -> None:
     while not stop_event.is_set():
         try:
+            await run_token_refresh_cycle(session_factory)
             await run_sync_cycle(session_factory)
         except Exception as exc:
             logger.exception(

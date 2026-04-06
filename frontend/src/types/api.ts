@@ -49,6 +49,10 @@ export type Workspace = {
   sync_reason?: string | null;
   sync_priority?: number;
   is_hot?: boolean;
+  last_token_refresh_at?: string | null;
+  last_token_refresh_error?: string | null;
+  token_refresh_fail_count?: number;
+  token_refresh_blocked?: boolean;
 };
 
 export type WorkspaceEvent = {
@@ -57,6 +61,8 @@ export type WorkspaceEvent = {
     | "workspace_updated"
     | "sync_failed"
     | "workspace_scheduled"
+    | "workspace_token_refreshed"
+    | "workspace_token_refresh_failed"
     | "heartbeat";
   org_id?: string;
   timestamp: string;
@@ -68,12 +74,12 @@ export type WorkspaceEvent = {
   is_hot?: boolean;
   pending_invites?: number;
   priority?: number;
-  summary?: {
-    member_count: number;
-    pending_invites: number;
+  summary?: Partial<Workspace> & {
+    member_count?: number;
+    pending_invites?: number;
     unauthorized_active_count?: number;
-    status: string;
-    last_sync: string | null;
+    status?: string;
+    last_sync?: string | null;
   };
   error?: {
     message: string;
@@ -157,6 +163,16 @@ export type WorkspaceRenameResult = MutationResult<never> & {
 };
 
 export type WorkspaceTokenUpdateResult = MutationResult<never>;
+
+export type WorkspaceTokenRefreshResult = MutationResult<never> & {
+  status: "success" | "partial_success" | "failed" | "in_progress";
+  message: string;
+  workspace_id: string;
+  owner_email?: string;
+  token_updated: boolean;
+  sync_completed: boolean;
+  already_in_progress?: boolean;
+};
 
 export type WorkspacePolicyUpdateResult = MutationResult<never> & {
   unauthorized_member_mode: UnauthorizedMemberMode;

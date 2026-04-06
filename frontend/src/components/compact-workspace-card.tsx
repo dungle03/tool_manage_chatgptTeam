@@ -186,7 +186,7 @@ function CompactWorkspaceCardComponent({
             className="compact-toolbar-icon"
             id={`workspace-token-${orgId}`}
             onClick={onUpdateToken}
-            aria-label={`Cập nhật token cho workspace ${title}`}
+            aria-label={`Refresh token cho workspace ${title}`}
           >
             <svg
               viewBox="0 0 20 20"

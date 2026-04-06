@@ -84,6 +84,10 @@ def _migrate_add_missing_columns() -> None:
                 "sync_priority": "INTEGER DEFAULT 0",
                 "unauthorized_member_mode": "VARCHAR DEFAULT 'auto_kick'",
                 "unauthorized_last_detected_at": "DATETIME",
+                "last_token_refresh_at": "DATETIME",
+                "last_token_refresh_error": "TEXT",
+                "token_refresh_fail_count": "INTEGER DEFAULT 0",
+                "token_refresh_blocked": "BOOLEAN DEFAULT 0",
             }
             for col, col_type in new_cols.items():
                 if col not in existing:
