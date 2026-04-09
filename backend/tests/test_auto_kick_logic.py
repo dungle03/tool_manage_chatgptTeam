@@ -124,3 +124,70 @@ def test_auto_kick_detects_and_removes_truly_unauthorized_member(
         assert intruder_member is None
     finally:
         session.close()
+
+
+def test_auto_kick_uses_alternate_remote_member_id_fields(
+    client, seed_data, monkeypatch
+):
+    async def fake_get_members(_self, _access_token, _account_id):
+        return [
+            {
+                "id": "user_remote_owner",
+                "email": "owner@company.com",
+                "name": "Owner",
+                "role": "owner",
+                "created": "2026-03-09T00:00:00Z",
+            },
+            {
+                "user_id": "user_remote_alt_intruder",
+                "email": "alt-intruder@evil.com",
+                "name": "Alt Intruder",
+                "role": "member",
+                "created": "2026-03-10T00:00:00Z",
+            },
+        ]
+
+    async def fake_get_invites(_self, _access_token, _account_id):
+        return []
+
+    delete_calls = []
+
+    async def fake_delete_member(_self, _access_token, _account_id, _user_id):
+        delete_calls.append((_account_id, _user_id))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_members",
+        fake_get_members,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_invites",
+        fake_get_invites,
+    )
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.delete_member",
+        fake_delete_member,
+    )
+
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter_by(org_id="org_001").one()
+        workspace.unauthorized_member_mode = "auto_kick"
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.post("/api/workspaces/org_001/sync")
+    assert response.status_code == 200, response.text
+    assert delete_calls == [("acc_001", "user_remote_alt_intruder")]
+
+    session = SessionLocal()
+    try:
+        finding = (
+            session.query(UnauthorizedFinding)
+            .filter_by(org_id="org_001", remote_id="user_remote_alt_intruder")
+            .one()
+        )
+        assert finding.status == "kicked"
+    finally:
+        session.close()

@@ -28,6 +28,7 @@ import {
   refreshWorkspaceToken,
   updateWorkspaceToken,
 } from "@/lib/api";
+import { useWorkspaceTokenRefreshLifecycle } from "@/lib/use-workspace-token-refresh";
 import type { GlobalUnauthorizedFinding } from "@/lib/api";
 import {
   applyWorkspaceSummaryList,
@@ -68,9 +69,6 @@ const DEFAULT_WS_STATE: WorkspaceState = {
 
 const EVENT_REFRESH_WINDOW_MS = 450;
 const RECOVERY_REFRESH_COOLDOWN_MS = 5_000;
-const TOKEN_REFRESH_POLL_INTERVAL_MS = 2_500;
-const TOKEN_REFRESH_POLL_DELAY_NOTICE_ATTEMPT = 12;
-const TOKEN_REFRESH_POLL_MAX_ATTEMPTS = 48;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -100,23 +98,6 @@ function formatDashboardDateLabel(prefix: string, timestamp?: string | null): st
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const year = date.getUTCFullYear();
   return `${prefix}: ${day}/${month}/${year}`;
-}
-
-function formatAccessTokenRemainingTime(timestamp?: string | null): string | null {
-  if (!timestamp) return null;
-
-  const target = new Date(timestamp).getTime();
-  if (Number.isNaN(target)) return null;
-
-  const diffSeconds = Math.max(Math.floor((target - Date.now()) / 1000), 0);
-  const days = Math.floor(diffSeconds / 86400);
-  const hours = Math.floor((diffSeconds % 86400) / 3600);
-  const minutes = Math.floor((diffSeconds % 3600) / 60);
-
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return "sắp hết hạn";
 }
 
 function getActionErrorCopy(
@@ -194,15 +175,6 @@ export default function DashboardPage() {
     ((orgId?: string, options?: { immediate?: boolean; includeDetails?: boolean }) => Promise<void>) | null
   >(null);
   const showToastRef = useRef<((title: string, message: string, tone?: ToastState["tone"], dedupeKey?: string) => void) | null>(null);
-  const tokenRefreshPollTimersRef = useRef(new Map<string, number>());
-  const tokenRefreshPollStateRef = useRef(new Map<string, {
-    baselineExpiry: string | null | undefined;
-    baselineRefreshAt: string | null | undefined;
-    baselineError: string | null | undefined;
-    baselineFailCount: number | null | undefined;
-    attempts: number;
-    timeoutNotified: boolean;
-  }>());
 
   function showToast(
     title: string,
@@ -355,133 +327,7 @@ export default function DashboardPage() {
     }, delayMs);
   }, []);
 
-  const stopTokenRefreshPolling = useCallback((orgId: string) => {
-    const timerId = tokenRefreshPollTimersRef.current.get(orgId);
-    if (timerId) {
-      window.clearTimeout(timerId);
-      tokenRefreshPollTimersRef.current.delete(orgId);
-    }
-    tokenRefreshPollStateRef.current.delete(orgId);
-  }, []);
 
-  const buildTokenRefreshSuccessMessage = useCallback((orgId: string, summary?: Partial<Workspace> | null) => {
-    const expiryCopy = formatAccessTokenRemainingTime(summary?.access_token_expires_at);
-    return expiryCopy
-      ? `Workspace ${orgId} đã cập nhật token mới. Hạn dùng còn khoảng ${expiryCopy}.`
-      : `Workspace ${orgId} đã cập nhật token và thời hạn mới.`;
-  }, []);
-
-  const startTokenRefreshPolling = useCallback((workspace: Workspace) => {
-    stopTokenRefreshPolling(workspace.org_id);
-
-    tokenRefreshPollStateRef.current.set(workspace.org_id, {
-      baselineExpiry: workspace.access_token_expires_at,
-      baselineRefreshAt: workspace.last_token_refresh_at,
-      baselineError: workspace.last_token_refresh_error,
-      baselineFailCount: workspace.token_refresh_fail_count,
-      attempts: 0,
-      timeoutNotified: false,
-    });
-
-    const poll = async () => {
-      const state = tokenRefreshPollStateRef.current.get(workspace.org_id);
-      if (!state) {
-        return;
-      }
-
-      try {
-        const latestWorkspaces = await getWorkspaces({ forceFresh: true });
-        const latestWorkspace = latestWorkspaces.find((item) => item.org_id === workspace.org_id);
-        if (!latestWorkspace) {
-          stopTokenRefreshPolling(workspace.org_id);
-          return;
-        }
-
-        setWorkspaces(latestWorkspaces);
-        applyWorkspaceSummary(latestWorkspace);
-        mergeWorkspaceRecord(latestWorkspace);
-
-        const refreshAtChanged = latestWorkspace.last_token_refresh_at !== state.baselineRefreshAt;
-        const expiryChanged = latestWorkspace.access_token_expires_at !== state.baselineExpiry;
-        const errorChanged = latestWorkspace.last_token_refresh_error !== state.baselineError;
-        const failCountChanged = latestWorkspace.token_refresh_fail_count !== state.baselineFailCount;
-
-        if (refreshAtChanged || expiryChanged) {
-          stopTokenRefreshPolling(workspace.org_id);
-          showToastRef.current?.(
-            "Refresh token thành công",
-            buildTokenRefreshSuccessMessage(workspace.org_id, latestWorkspace),
-            "success",
-            `workspace-token-refreshed-${workspace.org_id}`
-          );
-          return;
-        }
-
-        if ((errorChanged || failCountChanged) && latestWorkspace.last_token_refresh_error) {
-          stopTokenRefreshPolling(workspace.org_id);
-          showToastRef.current?.(
-            "Refresh token thất bại",
-            `Workspace ${workspace.org_id}: ${latestWorkspace.last_token_refresh_error}`,
-            "error",
-            `workspace-token-refresh-failed-${workspace.org_id}`
-          );
-          return;
-        }
-      } catch {
-        // Keep polling quietly; the SSE path may still arrive.
-      }
-
-      const nextState = tokenRefreshPollStateRef.current.get(workspace.org_id);
-      if (!nextState) {
-        return;
-      }
-
-      const nextAttempts = nextState.attempts + 1;
-
-      if (
-        nextAttempts >= TOKEN_REFRESH_POLL_DELAY_NOTICE_ATTEMPT
-        && !nextState.timeoutNotified
-      ) {
-        tokenRefreshPollStateRef.current.set(workspace.org_id, {
-          ...nextState,
-          attempts: nextAttempts,
-          timeoutNotified: true,
-        });
-        showToastRef.current?.(
-          "Refresh token đang xử lý lâu hơn dự kiến",
-          `Workspace ${workspace.org_id} vẫn đang được theo dõi trong nền. Dashboard sẽ báo tiếp ngay khi refresh hoàn tất.`,
-          "info",
-          `workspace-token-refresh-timeout-${workspace.org_id}`
-        );
-      } else {
-        tokenRefreshPollStateRef.current.set(workspace.org_id, {
-          ...nextState,
-          attempts: nextAttempts,
-        });
-      }
-
-      if (nextAttempts >= TOKEN_REFRESH_POLL_MAX_ATTEMPTS) {
-        stopTokenRefreshPolling(workspace.org_id);
-        showToastRef.current?.(
-          "Refresh token vẫn chưa hoàn tất",
-          `Workspace ${workspace.org_id} đang mất nhiều thời gian hơn bình thường. Anh có thể tiếp tục chờ hoặc bấm refresh lại để kiểm tra.`,
-          "info",
-          `workspace-token-refresh-gave-up-${workspace.org_id}`
-        );
-        return;
-      }
-
-      const timerId = window.setTimeout(() => {
-        void poll();
-      }, TOKEN_REFRESH_POLL_INTERVAL_MS);
-      tokenRefreshPollTimersRef.current.set(workspace.org_id, timerId);
-    };
-
-    const timerId = window.setTimeout(() => {
-      void poll();
-    }, TOKEN_REFRESH_POLL_INTERVAL_MS);
-    tokenRefreshPollTimersRef.current.set(workspace.org_id, timerId);
-  }, [applyWorkspaceSummary, buildTokenRefreshSuccessMessage, mergeWorkspaceRecord, stopTokenRefreshPolling]);
 
   const scheduleWorkspaceDetailRefresh = useCallback((orgId: string) => {
     const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
@@ -501,6 +347,16 @@ export default function DashboardPage() {
 
     detailRefreshTimersRef.current.set(orgId, timerId);
   }, []);
+
+  const { clearTokenRefreshPolling, handleTokenRefreshEvent, startTokenRefreshPolling, stopTokenRefreshPolling } = useWorkspaceTokenRefreshLifecycle({
+    applyWorkspaceSummary,
+    mergeWorkspaceRecord,
+    refreshWorkspaceList: (options) => loadWorkspacesRef.current?.(options),
+    scheduleWorkspaceDetailRefresh,
+    setWorkspaceSyncing: (orgId, syncing) => updateWsState(orgId, { syncing }),
+    setWorkspaces,
+    showToast,
+  });
 
   const triggerPostActionRefresh = useCallback(
     async (
@@ -627,7 +483,7 @@ export default function DashboardPage() {
         try {
           const findings = await listAllUnauthorizedFindings({ forceFresh: true });
           setGlobalUnauthorizedFindings(
-            findings.filter((finding) => finding.status !== "trusted")
+            findings.filter((finding) => finding.status === "detected" || finding.status === "kick_failed")
           );
           setUnauthorizedBannerDismissed(false);
         } catch {
@@ -646,41 +502,7 @@ export default function DashboardPage() {
       return;
     }
 
-    if (event.type === "workspace_token_refreshed") {
-      stopTokenRefreshPolling(event.org_id);
-      updateWsState(event.org_id, { syncing: false });
-      invalidateApiCache();
-      void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
-      scheduleWorkspaceDetailRefresh(event.org_id);
-      if (event.summary) {
-        mergeWorkspaceRecord(event.summary as Workspace);
-      }
-      showToastRef.current?.(
-        "Refresh token thành công",
-        buildTokenRefreshSuccessMessage(event.org_id, event.summary),
-        "success",
-        `workspace-token-refreshed-${event.org_id}`
-      );
-      return;
-    }
-
-    if (event.type === "workspace_token_refresh_failed") {
-      stopTokenRefreshPolling(event.org_id);
-      updateWsState(event.org_id, { syncing: false });
-      invalidateApiCache();
-      void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
-      scheduleWorkspaceDetailRefresh(event.org_id);
-      if (event.summary) {
-        mergeWorkspaceRecord(event.summary as Workspace);
-      }
-      showToastRef.current?.(
-        "Refresh token thất bại",
-        event.error?.message
-          ? `Workspace ${event.org_id}: ${event.error.message}`
-          : `Workspace ${event.org_id} không thể cập nhật token.`,
-        "error",
-        `workspace-token-refresh-failed-${event.org_id}`
-      );
+    if (handleTokenRefreshEvent(event)) {
       return;
     }
 
@@ -696,7 +518,7 @@ export default function DashboardPage() {
         `sync-failed-${event.org_id}`
       );
     }
-  }, [scheduleWorkspaceDetailRefresh, scheduleWorkspaceListRefresh, updateWsState]);
+  }, [handleTokenRefreshEvent, scheduleWorkspaceDetailRefresh, scheduleWorkspaceListRefresh, updateWsState]);
 
   const connectWorkspaceEvents = useCallback(() => {
     if (eventSourceRef.current) {
@@ -743,9 +565,10 @@ export default function DashboardPage() {
     eventSource.addEventListener("sync_started", onMessage as EventListener);
     eventSource.addEventListener("workspace_updated", onMessage as EventListener);
     eventSource.addEventListener("workspace_token_refreshed", onMessage as EventListener);
+    eventSource.addEventListener("workspace_token_refresh_failed", onMessage as EventListener);
     eventSource.addEventListener("sync_failed", onMessage as EventListener);
     eventSource.onerror = onError;
-  }, [handleWorkspaceEvent]);
+  }, [handleTokenRefreshEvent, handleWorkspaceEvent]);
 
   useEffect(() => {
     void loadWorkspaces();
@@ -754,7 +577,7 @@ export default function DashboardPage() {
       try {
         const findings = await listAllUnauthorizedFindings({ forceFresh: true });
         setGlobalUnauthorizedFindings(
-          findings.filter((finding) => finding.status !== "trusted")
+          findings.filter((finding) => finding.status === "detected" || finding.status === "kick_failed")
         );
         setUnauthorizedBannerDismissed(false);
       } catch {
@@ -777,16 +600,12 @@ export default function DashboardPage() {
         window.clearTimeout(timerId);
       }
       detailRefreshTimersRef.current.clear();
-      for (const timerId of tokenRefreshPollTimersRef.current.values()) {
-        window.clearTimeout(timerId);
-      }
-      tokenRefreshPollTimersRef.current.clear();
-      tokenRefreshPollStateRef.current.clear();
+      clearTokenRefreshPolling();
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
     };
-  }, [connectWorkspaceEvents]);
+  }, [clearTokenRefreshPolling, connectWorkspaceEvents]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -1268,10 +1087,10 @@ export default function DashboardPage() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
             <div>
               <h3 className="section-heading" style={{ color: "#f5c451", marginBottom: 8 }}>
-                ⚠️ Auto-Kick Report — {globalUnauthorizedFindings.length} unauthorized member{globalUnauthorizedFindings.length > 1 ? "s" : ""} detected
+                ⚠️ Unauthorized Member Alert — {globalUnauthorizedFindings.length} active case{globalUnauthorizedFindings.length > 1 ? "s" : ""}
               </h3>
               <p className="section-description" style={{ marginBottom: 12 }}>
-                Các thành viên dưới đây được phát hiện không có trong local database (whitelist) và đã được xử lý tự động.
+                Các thành viên dưới đây đang là case chưa xử lý dứt điểm trong local whitelist. Nếu auto-kick thành công thì case sẽ tự biến mất khỏi banner này.
               </p>
             </div>
             <button

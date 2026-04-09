@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from jwt import PyJWTError
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Invite, Member, UnauthorizedFinding, Workspace
@@ -21,6 +21,20 @@ from app.services.token_refresher import (
     run_token_refresher_for_workspace,
     select_due_token_refresh_workspace_ids,
     verify_refreshed_token_for_workspace,
+)
+from app.services.workspace_schedule import (
+    build_baseline_schedule_update,
+    build_followup_schedule_update,
+    build_next_sync_after_success_update,
+    build_retry_after_failure_update,
+    compute_workspace_priority,
+    normalize_schedule_datetime,
+)
+from app.services.workspace_unauthorized import (
+    active_unauthorized_count as get_unauthorized_active_count,
+    build_unauthorized_count_map as unauthorized_build_count_map,
+    process_remote_member_authorization,
+    serialize_unauthorized_finding_row as serialize_unauthorized_finding_row_impl,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,29 +59,7 @@ TOKEN_AUTO_REFRESH_BATCH_DELAY_SECONDS = max(
 )
 
 
-def _parse_step_list(raw_value: str, fallback: list[int]) -> list[int]:
-    values: list[int] = []
-    for item in raw_value.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        try:
-            parsed = int(item)
-        except ValueError:
-            continue
-        if parsed > 0:
-            values.append(parsed)
-    return values or fallback
-
-
-SYNC_FOLLOWUP_STEPS = _parse_step_list(
-    os.getenv("SYNC_FOLLOWUP_STEPS", "5,15,30,60"),
-    [5, 15, 30, 60],
-)
-SYNC_ERROR_RETRY_STEPS = _parse_step_list(
-    os.getenv("SYNC_ERROR_RETRY_STEPS", "10,30,60"),
-    [10, 30, 60],
-)
+SYNC_FOLLOWUP_STEPS = [5, 15, 30, 60]
 
 
 def _get_workspace_lock(org_id: str) -> asyncio.Lock:
@@ -126,218 +118,13 @@ def serialize_member_row(member: Member) -> dict[str, Any]:
 
 
 def serialize_unauthorized_finding_row(finding: UnauthorizedFinding) -> dict[str, Any]:
-    return {
-        "id": finding.id,
-        "org_id": finding.org_id,
-        "remote_id": finding.remote_id,
-        "email": finding.email,
-        "name": finding.name,
-        "role": finding.role,
-        "status": finding.status,
-        "detection_reason": finding.detection_reason,
-        "action_reason": finding.action_reason,
-        "first_seen_at": serialize_datetime(finding.first_seen_at),
-        "last_seen_at": serialize_datetime(finding.last_seen_at),
-        "resolved_at": serialize_datetime(finding.resolved_at),
-        "created_at": serialize_datetime(finding.created_at),
-        "updated_at": serialize_datetime(finding.updated_at),
-    }
-
-
-def _active_unauthorized_statuses() -> tuple[str, ...]:
-    return ("detected", "kick_failed")
-
-
-def _build_unauthorized_count_map(
-    session: Session,
-    org_ids: list[str],
-) -> dict[str, int]:
-    if not org_ids:
-        return {}
-
-    rows = session.execute(
-        select(UnauthorizedFinding.org_id, func.count().label("active_count"))
-        .where(
-            UnauthorizedFinding.org_id.in_(org_ids),
-            UnauthorizedFinding.status.in_(_active_unauthorized_statuses()),
-        )
-        .group_by(UnauthorizedFinding.org_id)
-    ).all()
-    return {str(org_id): int(active_count or 0) for org_id, active_count in rows}
-
-
-def _active_unauthorized_count(session: Session, org_id: str) -> int:
-    return int(
-        session.execute(
-            select(func.count())
-            .select_from(UnauthorizedFinding)
-            .where(
-                UnauthorizedFinding.org_id == org_id,
-                UnauthorizedFinding.status.in_(_active_unauthorized_statuses()),
-            )
-        ).scalar_one()
-        or 0
-    )
-
-
-def _normalize_remote_member(item: dict[str, Any]) -> dict[str, Any]:
-    created_raw = (
-        item.get("created_time") or item.get("created_at") or item.get("created")
-    )
-    return {
-        "remote_id": str(item.get("id") or "") or None,
-        "email": item.get("email") or "",
-        "name": item.get("name") or "",
-        "role": normalize_member_role(item),
-        "status": item.get("status") or "active",
-        "created_at": parse_datetime(created_raw),
-        "picture": item.get("picture"),
-    }
-
-
-def _upsert_unauthorized_finding(
-    session: Session,
-    *,
-    workspace: Workspace,
-    member: dict[str, Any],
-    detected_at: datetime,
-) -> UnauthorizedFinding:
-    normalized_email = normalize_identity(member.get("email")) or ""
-    remote_id = member.get("remote_id")
-
-    existing = None
-    if remote_id:
-        existing = session.execute(
-            select(UnauthorizedFinding).where(
-                UnauthorizedFinding.org_id == workspace.org_id,
-                UnauthorizedFinding.remote_id == remote_id,
-            )
-        ).scalar_one_or_none()
-    if existing is None and normalized_email:
-        existing = session.execute(
-            select(UnauthorizedFinding).where(
-                UnauthorizedFinding.org_id == workspace.org_id,
-                func.lower(UnauthorizedFinding.email) == normalized_email,
-            )
-        ).scalar_one_or_none()
-
-    if existing is None:
-        existing = UnauthorizedFinding(
-            org_id=workspace.org_id,
-            remote_id=remote_id,
-            email=member.get("email") or "",
-            name=member.get("name") or "",
-            role=member.get("role") or "user",
-            status="detected",
-            detection_reason="missing_from_local_whitelist",
-            first_seen_at=detected_at,
-            last_seen_at=detected_at,
-            created_at=detected_at,
-            updated_at=detected_at,
-        )
-        session.add(existing)
-        session.flush()
-        return existing
-
-    existing.remote_id = remote_id or existing.remote_id
-    existing.email = member.get("email") or existing.email
-    existing.name = member.get("name") or existing.name
-    existing.role = member.get("role") or existing.role
-    existing.last_seen_at = detected_at
-    existing.updated_at = detected_at
-    existing.resolved_at = None
-    if existing.status not in {"trusted", "kicked"}:
-        existing.status = "detected"
-        existing.action_reason = None
-    return existing
-
-
-def _mark_missing_findings_resolved(
-    session: Session,
-    *,
-    workspace: Workspace,
-    active_remote_keys: set[tuple[str | None, str | None]],
-    resolved_at: datetime,
-) -> None:
-    findings = (
-        session.execute(
-            select(UnauthorizedFinding).where(
-                UnauthorizedFinding.org_id == workspace.org_id
-            )
-        )
-        .scalars()
-        .all()
-    )
-    updated = False
-    for finding in findings:
-        finding_key = (
-            normalize_identity(finding.remote_id),
-            normalize_identity(finding.email),
-        )
-        if finding_key in active_remote_keys:
-            continue
-        if finding.status in _active_unauthorized_statuses():
-            previous_status = finding.status
-            finding.resolved_at = resolved_at
-            finding.updated_at = resolved_at
-            finding.status = "trusted"
-            if previous_status == "detected":
-                finding.action_reason = (
-                    finding.action_reason or "member_no_longer_present"
-                )
-            else:
-                finding.action_reason = (
-                    finding.action_reason
-                    or "member_no_longer_present_after_kick_failure"
-                )
-            updated = True
-
-    if updated:
-        session.flush()
-
-
-def _auto_resolve_stale_finding(
-    session: Session,
-    *,
-    workspace: Workspace,
-    remote_id: str | None,
-    email: str | None,
-    resolved_at: datetime,
-) -> None:
-    """Resolve any active finding for a member who is now whitelisted.
-
-    This handles the case where an invitee was flagged as unauthorized
-    (e.g. they accepted an invite after auto-kick was enabled) but is
-    now a legitimate member in the whitelist.
-    """
-    if not remote_id and not email:
-        return
-
-    filters = [UnauthorizedFinding.org_id == workspace.org_id]
-    identity_clauses = []
-    if remote_id:
-        identity_clauses.append(func.lower(UnauthorizedFinding.remote_id) == remote_id)
-    if email:
-        identity_clauses.append(func.lower(UnauthorizedFinding.email) == email)
-    if len(identity_clauses) == 1:
-        filters.append(identity_clauses[0])
-    else:
-        filters.append(identity_clauses[0] | identity_clauses[1])
-
-    filters.append(UnauthorizedFinding.status.in_(_active_unauthorized_statuses()))
-
-    stale_findings = (
-        session.execute(select(UnauthorizedFinding).where(*filters)).scalars().all()
-    )
-
-    for finding in stale_findings:
-        finding.status = "trusted"
-        finding.action_reason = "whitelisted_member_auto_resolved"
-        finding.resolved_at = resolved_at
-        finding.updated_at = resolved_at
-
-    if stale_findings:
-        session.flush()
+    payload = serialize_unauthorized_finding_row_impl(finding)
+    payload["first_seen_at"] = serialize_datetime(finding.first_seen_at)
+    payload["last_seen_at"] = serialize_datetime(finding.last_seen_at)
+    payload["resolved_at"] = serialize_datetime(finding.resolved_at)
+    payload["created_at"] = serialize_datetime(finding.created_at)
+    payload["updated_at"] = serialize_datetime(finding.updated_at)
+    return payload
 
 
 def build_action_response(
@@ -464,33 +251,7 @@ def get_access_token_expiry(workspace: Workspace) -> datetime | None:
 
 
 def coerce_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _step_index_from_reason(reason: str | None) -> int:
-    if not reason or not reason.startswith("followup:"):
-        return -1
-    try:
-        return int(reason.split(":", 1)[1])
-    except ValueError:
-        return -1
-
-
-def _priority_for_workspace(
-    workspace: Workspace, pending_invites: int, now: datetime
-) -> int:
-    hot_until = coerce_utc(workspace.hot_until)
-    if workspace.status == "error":
-        return 80
-    if pending_invites > 0:
-        return 100
-    if hot_until and hot_until > now:
-        return 90
-    return 10
+    return normalize_schedule_datetime(dt)
 
 
 def _publish_schedule_event(workspace: Workspace, pending_invites: int) -> None:
@@ -507,6 +268,11 @@ def _publish_schedule_event(workspace: Workspace, pending_invites: int) -> None:
     )
 
 
+def _apply_schedule_update(workspace: Workspace, update: dict[str, Any]) -> None:
+    for field_name, value in update.items():
+        setattr(workspace, field_name, value)
+
+
 def schedule_followup_sync(
     session: Session,
     workspace: Workspace,
@@ -518,30 +284,17 @@ def schedule_followup_sync(
 ) -> None:
     now = utc_now()
     pending_invites = _pending_invite_count(session, workspace.org_id)
-    effective_hot_window = (
-        hot_window_seconds
-        if hot_window_seconds is not None
-        else SYNC_HOT_WINDOW_SECONDS
+    _apply_schedule_update(
+        workspace,
+        build_followup_schedule_update(
+            workspace,
+            now=now,
+            reason=reason,
+            pending_invites=pending_invites,
+            delay_seconds=delay_seconds,
+            hot_window_seconds=hot_window_seconds,
+        ),
     )
-    hot_until = now + timedelta(seconds=max(0, effective_hot_window))
-    effective_delay = (
-        delay_seconds if delay_seconds is not None else SYNC_FOLLOWUP_STEPS[0]
-    )
-    next_sync_at = now + timedelta(seconds=max(0, effective_delay))
-
-    current_hot_until = coerce_utc(workspace.hot_until)
-    current_next_sync_at = coerce_utc(workspace.next_sync_at)
-    workspace.last_activity_at = now
-    workspace.hot_until = (
-        max(current_hot_until, hot_until) if current_hot_until else hot_until
-    )
-    workspace.next_sync_at = (
-        min(current_next_sync_at, next_sync_at)
-        if current_next_sync_at is not None
-        else next_sync_at
-    )
-    workspace.sync_reason = reason
-    workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
 
     if publish_event:
         _publish_schedule_event(workspace, pending_invites)
@@ -553,10 +306,14 @@ def _set_baseline_schedule(
     now: datetime,
     pending_invites: int,
 ) -> None:
-    workspace.hot_until = None
-    workspace.next_sync_at = now + timedelta(minutes=SYNC_BASELINE_MINUTES)
-    workspace.sync_reason = "baseline_refresh"
-    workspace.sync_priority = _priority_for_workspace(workspace, pending_invites, now)
+    _apply_schedule_update(
+        workspace,
+        build_baseline_schedule_update(
+            workspace,
+            now=now,
+            pending_invites=pending_invites,
+        ),
+    )
 
 
 def _schedule_next_sync_after_success(
@@ -565,38 +322,13 @@ def _schedule_next_sync_after_success(
     *,
     pending_invites: int,
 ) -> None:
-    last_sync = coerce_utc(workspace.last_sync) or utc_now()
-
-    if pending_invites > 0:
-        schedule_followup_sync(
-            session,
-            workspace,
-            reason="pending_invite_watch",
-            delay_seconds=SYNC_PENDING_INVITE_SECONDS,
-            publish_event=False,
-        )
-        return
-
-    hot_until = coerce_utc(workspace.hot_until)
-    current_step_index = _step_index_from_reason(workspace.sync_reason)
-    has_active_hot_window = bool(hot_until and hot_until > last_sync)
-
-    if has_active_hot_window:
-        next_step_index = current_step_index + 1
-        if 0 <= next_step_index < len(SYNC_FOLLOWUP_STEPS):
-            schedule_followup_sync(
-                session,
-                workspace,
-                reason=f"followup:{next_step_index}",
-                delay_seconds=SYNC_FOLLOWUP_STEPS[next_step_index],
-                publish_event=False,
-            )
-            return
-
-    _set_baseline_schedule(
+    _apply_schedule_update(
         workspace,
-        now=last_sync,
-        pending_invites=pending_invites,
+        build_next_sync_after_success_update(
+            workspace,
+            pending_invites=pending_invites,
+            last_sync=workspace.last_sync,
+        ),
     )
 
 
@@ -604,13 +336,13 @@ def _schedule_retry_after_failure(
     session: Session,
     workspace: Workspace,
 ) -> None:
-    retry_delay = SYNC_ERROR_RETRY_STEPS[0]
-    schedule_followup_sync(
-        session,
+    _apply_schedule_update(
         workspace,
-        reason="retry_after_error",
-        delay_seconds=retry_delay,
-        publish_event=False,
+        build_retry_after_failure_update(
+            workspace,
+            pending_invites=_pending_invite_count(session, workspace.org_id),
+            now=utc_now(),
+        ),
     )
 
 
@@ -722,68 +454,6 @@ async def resolve_access_token(workspace: Workspace) -> str:
         return workspace.access_token
 
     raise HTTPException(status_code=400, detail="workspace missing access token")
-
-
-def workspace_to_dict(
-    workspace: Workspace,
-    session: Session,
-    *,
-    current_user_role: str | None = None,
-    pending_invites: int | None = None,
-    unauthorized_active_count: int | None = None,
-) -> dict[str, Any]:
-    resolved_current_user_role = current_user_role or get_current_user_role(
-        workspace, session
-    )
-    resolved_pending_invites = (
-        pending_invites
-        if pending_invites is not None
-        else _pending_invite_count(session, workspace.org_id)
-    )
-    resolved_unauthorized_count = (
-        unauthorized_active_count
-        if unauthorized_active_count is not None
-        else _active_unauthorized_count(session, workspace.org_id)
-    )
-    now = utc_now()
-    hot_until = coerce_utc(workspace.hot_until)
-    is_hot = bool(hot_until and hot_until > now)
-    return {
-        "id": workspace.id,
-        "org_id": workspace.org_id,
-        "account_id": workspace.account_id,
-        "name": workspace.name,
-        "status": workspace.status,
-        "member_count": workspace.member_count,
-        "member_limit": workspace.member_limit,
-        "pending_invites": resolved_pending_invites,
-        "unauthorized_member_mode": workspace.unauthorized_member_mode,
-        "unauthorized_active_count": resolved_unauthorized_count,
-        "unauthorized_last_detected_at": serialize_datetime(
-            workspace.unauthorized_last_detected_at
-        ),
-        "expires_at": serialize_datetime(workspace.expires_at),
-        "access_token_expires_at": serialize_datetime(
-            get_access_token_expiry(workspace)
-        ),
-        "last_sync": serialize_datetime(workspace.last_sync),
-        "created_at": serialize_datetime(workspace.created_at),
-        "current_user_role": resolved_current_user_role,
-        "can_manage_members": resolved_current_user_role in ("owner", "admin"),
-        "sync_error": workspace.sync_error,
-        "sync_started_at": serialize_datetime(workspace.sync_started_at),
-        "sync_finished_at": serialize_datetime(workspace.sync_finished_at),
-        "next_sync_at": serialize_datetime(workspace.next_sync_at),
-        "hot_until": serialize_datetime(workspace.hot_until),
-        "last_activity_at": serialize_datetime(workspace.last_activity_at),
-        "sync_reason": workspace.sync_reason,
-        "sync_priority": workspace.sync_priority,
-        "is_hot": is_hot,
-        "last_token_refresh_at": serialize_datetime(workspace.last_token_refresh_at),
-        "last_token_refresh_error": workspace.last_token_refresh_error,
-        "token_refresh_fail_count": int(workspace.token_refresh_fail_count or 0),
-        "token_refresh_blocked": bool(workspace.token_refresh_blocked),
-    }
 
 
 def _pending_invite_count(
@@ -915,7 +585,7 @@ def workspace_to_dict(
     resolved_unauthorized_count = (
         unauthorized_active_count
         if unauthorized_active_count is not None
-        else _active_unauthorized_count(session, workspace.org_id)
+        else get_unauthorized_active_count(session, workspace.org_id)
     )
     now = utc_now()
     hot_until = coerce_utc(workspace.hot_until)
@@ -965,7 +635,7 @@ def build_workspace_list_payload(
     org_ids = [workspace.org_id for workspace in workspaces]
     pending_counts = _build_pending_invite_count_map(session, org_ids)
     role_map = _build_current_user_role_map(workspaces, session)
-    unauthorized_counts = _build_unauthorized_count_map(session, org_ids)
+    unauthorized_counts = unauthorized_build_count_map(session, org_ids)
     return [
         workspace_to_dict(
             workspace,
@@ -999,7 +669,7 @@ async def sync_workspace_data(
         workspace.sync_error = None
         workspace.sync_started_at = now
         workspace.next_sync_at = None
-        workspace.sync_priority = _priority_for_workspace(
+        workspace.sync_priority = compute_workspace_priority(
             workspace, _pending_invite_count(session, workspace_org_id), now
         )
         session.commit()
@@ -1055,66 +725,25 @@ async def sync_workspace_data(
                 if inv_email:
                     whitelisted_emails.add(inv_email)
 
-            normalized_remote_members = [
-                _normalize_remote_member(item) for item in remote_members
-            ]
-            unauthorized_members: list[dict[str, Any]] = []
-            active_remote_keys: set[tuple[str | None, str | None]] = set()
-            auto_kicked_remote_ids: set[str] = set()
             detected_at = utc_now()
-
-            for member in normalized_remote_members:
-                remote_id_key = normalize_identity(member.get("remote_id"))
-                email_key = normalize_identity(member.get("email"))
-                active_remote_keys.add((remote_id_key, email_key))
-                is_whitelisted = False
-                if remote_id_key and remote_id_key in whitelisted_remote_ids:
-                    is_whitelisted = True
-                elif email_key and email_key in whitelisted_emails:
-                    is_whitelisted = True
-
-                if not is_whitelisted:
-                    unauthorized_members.append(member)
-                    finding = _upsert_unauthorized_finding(
-                        session,
-                        workspace=workspace,
-                        member=member,
-                        detected_at=detected_at,
-                    )
-                    if workspace.unauthorized_member_mode == "auto_kick":
-                        remote_id = member.get("remote_id")
-                        if remote_id and member.get("role") != "owner":
-                            try:
-                                await chatgpt_service.delete_member(
-                                    access_token,
-                                    account_id,
-                                    remote_id,
-                                )
-                                finding.status = "kicked"
-                                finding.action_reason = "auto_kick_sync_enforcement"
-                                finding.resolved_at = detected_at
-                                normalized_remote_id = normalize_identity(remote_id)
-                                if normalized_remote_id:
-                                    auto_kicked_remote_ids.add(normalized_remote_id)
-                            except Exception as exc:
-                                finding.status = "kick_failed"
-                                finding.action_reason = str(exc)
-                                finding.resolved_at = None
-                        else:
-                            finding.status = "kick_failed"
-                            finding.action_reason = "remote_id_missing_or_owner"
-                            finding.resolved_at = None
-                        finding.updated_at = detected_at
-                else:
-                    # Member is legitimate — auto-resolve any stale finding
-                    # (e.g. invitee accepted after auto-kick was enabled)
-                    _auto_resolve_stale_finding(
-                        session,
-                        workspace=workspace,
-                        remote_id=remote_id_key,
-                        email=email_key,
-                        resolved_at=detected_at,
-                    )
+            authorization_result = await process_remote_member_authorization(
+                session,
+                workspace=workspace,
+                remote_members=remote_members,
+                whitelisted_remote_ids=whitelisted_remote_ids,
+                whitelisted_emails=whitelisted_emails,
+                detected_at=detected_at,
+                access_token=access_token,
+                account_id=account_id,
+                delete_member=chatgpt_service.delete_member,
+                normalize_member_role=normalize_member_role,
+                parse_datetime=parse_datetime,
+            )
+            normalized_remote_members = authorization_result[
+                "normalized_remote_members"
+            ]
+            unauthorized_members = authorization_result["unauthorized_members"]
+            auto_kicked_remote_ids = authorization_result["auto_kicked_remote_ids"]
 
             synced_members_for_cache = [
                 member
@@ -1122,16 +751,6 @@ async def sync_workspace_data(
                 if normalize_identity(member.get("remote_id"))
                 not in auto_kicked_remote_ids
             ]
-
-            if unauthorized_members:
-                workspace.unauthorized_last_detected_at = detected_at
-
-            _mark_missing_findings_resolved(
-                session,
-                workspace=workspace,
-                active_remote_keys=active_remote_keys,
-                resolved_at=detected_at,
-            )
 
             session.query(Member).where(Member.org_id == workspace.org_id).delete()
 
@@ -1231,7 +850,7 @@ async def sync_workspace_data(
             workspace.status = "live"
             workspace.sync_error = None
             pending_invites = _pending_invite_count(session, workspace.org_id)
-            unauthorized_active_count = _active_unauthorized_count(
+            unauthorized_active_count_value = get_unauthorized_active_count(
                 session, workspace.org_id
             )
             unauthorized_kicked = len(
@@ -1272,7 +891,7 @@ async def sync_workspace_data(
                     workspace,
                     session,
                     pending_invites=pending_invites,
-                    unauthorized_active_count=unauthorized_active_count,
+                    unauthorized_active_count=unauthorized_active_count_value,
                 ),
                 "refresh_hint": build_refresh_hint(
                     scope="workspace_detail",
@@ -1289,7 +908,7 @@ async def sync_workspace_data(
                     summary={
                         "member_count": workspace.member_count,
                         "pending_invites": pending_invites,
-                        "unauthorized_active_count": unauthorized_active_count,
+                        "unauthorized_active_count": unauthorized_active_count_value,
                         "status": workspace.status,
                         "last_sync": payload["last_sync"],
                     },
@@ -1405,7 +1024,7 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
         last_sync = coerce_utc(workspace.last_sync)
 
         if next_sync_at and next_sync_at <= now:
-            workspace.sync_priority = _priority_for_workspace(
+            workspace.sync_priority = compute_workspace_priority(
                 workspace, pending_invites, now
             )
             due_workspaces.append(workspace)
@@ -1413,7 +1032,7 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
 
         if workspace.last_sync is None:
             workspace.sync_reason = workspace.sync_reason or "baseline_refresh"
-            workspace.sync_priority = _priority_for_workspace(
+            workspace.sync_priority = compute_workspace_priority(
                 workspace, pending_invites, now
             )
             due_workspaces.append(workspace)
@@ -1421,7 +1040,7 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
 
         if pending_invites > 0 and last_sync and last_sync <= pending_cutoff:
             workspace.sync_reason = "pending_invite_watch"
-            workspace.sync_priority = _priority_for_workspace(
+            workspace.sync_priority = compute_workspace_priority(
                 workspace, pending_invites, now
             )
             due_workspaces.append(workspace)
@@ -1429,7 +1048,7 @@ def pick_due_workspaces(session: Session, *, limit: int) -> list[Workspace]:
 
         if last_sync and last_sync <= baseline_cutoff:
             workspace.sync_reason = workspace.sync_reason or "baseline_refresh"
-            workspace.sync_priority = _priority_for_workspace(
+            workspace.sync_priority = compute_workspace_priority(
                 workspace, pending_invites, now
             )
             due_workspaces.append(workspace)
@@ -1512,6 +1131,12 @@ async def run_token_refresh_cycle(session_factory: Any) -> None:
                     mark_workspace_refresh_success(workspace, verified_result)
                     session.commit()
                     session.refresh(workspace)
+                    workspace_event_broker.publish(
+                        "workspace_token_refreshed",
+                        org_id=workspace.org_id,
+                        trigger="auto",
+                        summary=workspace_to_dict(workspace, session),
+                    )
                 except TokenRefreshError as exc:
                     session.rollback()
                     managed_workspace = session.execute(
@@ -1524,6 +1149,14 @@ async def run_token_refresh_cycle(session_factory: Any) -> None:
                             mode="auto",
                         )
                         session.commit()
+                        session.refresh(managed_workspace)
+                        workspace_event_broker.publish(
+                            "workspace_token_refresh_failed",
+                            org_id=managed_workspace.org_id,
+                            trigger="auto",
+                            summary=workspace_to_dict(managed_workspace, session),
+                            error={"message": exc.message},
+                        )
                     logger.warning(
                         "Auto token refresh failed for workspace %s: %s",
                         org_id,
@@ -1560,6 +1193,13 @@ async def _background_sync_loop(
     while not stop_event.is_set():
         try:
             await run_token_refresh_cycle(session_factory)
+        except Exception as exc:
+            logger.exception(
+                "Background sync loop error while running token refresh cycle: %s",
+                exc,
+            )
+
+        try:
             await run_sync_cycle(session_factory)
         except Exception as exc:
             logger.exception(

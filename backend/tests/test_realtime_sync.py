@@ -425,6 +425,9 @@ def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
     calls = {"count": 0}
     log_messages: list[str] = []
 
+    async def fake_run_token_refresh_cycle(_session_factory):
+        return None
+
     async def fake_run_sync_cycle(_session_factory):
         calls["count"] += 1
         if calls["count"] == 1:
@@ -453,6 +456,10 @@ def test_background_sync_loop_continues_after_cycle_failure(monkeypatch):
             message = message % args
         log_messages.append(message)
 
+    monkeypatch.setattr(
+        "app.services.workspace_sync.run_token_refresh_cycle",
+        fake_run_token_refresh_cycle,
+    )
     monkeypatch.setattr(
         "app.services.workspace_sync.run_sync_cycle", fake_run_sync_cycle
     )
@@ -534,6 +541,57 @@ def test_sync_workspace_data_persists_error_state_after_commit_failure(
 def test_workspace_events_path_is_registered_in_openapi():
     paths = set(app.openapi()["paths"].keys())
     assert "/api/events/workspaces" in paths
+
+
+def test_run_token_refresh_cycle_publishes_auto_refresh_success_event(
+    seed_data, monkeypatch
+):
+    from app.services.workspace_sync import run_token_refresh_cycle
+
+    events: list[dict] = []
+    original_publish = workspace_event_broker.publish
+
+    def capture_publish(event_type: str, **payload):
+        event = original_publish(event_type, **payload)
+        events.append(event)
+        return event
+
+    async def fake_run_token_refresher_for_workspace(_session, _workspace, mode):
+        assert mode == "auto"
+        return {"access_token": "new-token"}
+
+    async def fake_verify_refreshed_token_for_workspace(_workspace, refresh_result):
+        return refresh_result
+
+    monkeypatch.setattr(
+        "app.services.events.workspace_event_broker.publish",
+        capture_publish,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.select_due_token_refresh_workspace_ids",
+        lambda _session: ["org_001"],
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.run_token_refresher_for_workspace",
+        fake_run_token_refresher_for_workspace,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.verify_refreshed_token_for_workspace",
+        fake_verify_refreshed_token_for_workspace,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.sync_workspace_data",
+        lambda *_args, **_kwargs: __import__("asyncio").sleep(0),
+    )
+
+    __import__("asyncio").run(run_token_refresh_cycle(SessionLocal))
+
+    refreshed_events = [
+        event for event in events if event["type"] == "workspace_token_refreshed"
+    ]
+    assert len(refreshed_events) == 1
+    assert refreshed_events[0]["org_id"] == "org_001"
+    assert refreshed_events[0]["trigger"] == "auto"
 
 
 def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(

@@ -50,6 +50,7 @@ vitest_output.txt
 
 # Uploads
 uploads/
+backend/exports/
 
 # .brain folder
 .brain/

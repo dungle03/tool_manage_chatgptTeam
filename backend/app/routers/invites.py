@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.auth import verify_admin_token
 from app.db import get_session
 from app.models import Invite, Workspace
-from app.schemas import InviteActionRequest, InviteOut, InviteRequest
+from app.schemas import InviteActionRequest, InviteRequest
 from app.services.chatgpt import chatgpt_service
 from app.services.workspace_sync import (
     build_action_response,
@@ -126,15 +126,40 @@ async def invite_member(
             detail=f"failed to create invite upstream: {exc}",
         ) from exc
 
-    invite = Invite(
-        org_id=payload.org_id,
-        email=normalized_email,
-        invite_id=str(remote_invite_id or normalized_email),
-        status="pending",
-        created_by_tool=True,
-        created_at=datetime.now(timezone.utc),
-    )
-    session.add(invite)
+    invite_id_value = str(remote_invite_id or normalized_email)
+    invite = None
+    if remote_invite_id:
+        invite = session.execute(
+            select(Invite).where(Invite.invite_id == invite_id_value)
+        ).scalar_one_or_none()
+
+    if invite is None:
+        invite = session.execute(
+            select(Invite).where(
+                Invite.org_id == payload.org_id,
+                or_(
+                    Invite.email == normalized_email,
+                    Invite.invite_id == invite_id_value,
+                ),
+            )
+        ).scalar_one_or_none()
+
+    if invite is None:
+        invite = Invite(
+            org_id=payload.org_id,
+            email=normalized_email,
+            invite_id=invite_id_value,
+            status="pending",
+            created_by_tool=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(invite)
+    else:
+        invite.org_id = payload.org_id
+        invite.email = normalized_email
+        invite.invite_id = invite_id_value
+        invite.status = "pending"
+        invite.created_by_tool = True
     session.flush()
     invite_payload = serialize_invite_row(invite)
     schedule_followup_sync(
