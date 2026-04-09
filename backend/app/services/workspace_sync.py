@@ -1137,6 +1137,10 @@ async def run_token_refresh_cycle(session_factory: Any) -> None:
                         trigger="auto",
                         summary=workspace_to_dict(workspace, session),
                     )
+                    logger.info(
+                        "Auto token refresh succeeded for workspace %s",
+                        workspace.org_id,
+                    )
                 except TokenRefreshError as exc:
                     session.rollback()
                     managed_workspace = session.execute(
@@ -1161,6 +1165,32 @@ async def run_token_refresh_cycle(session_factory: Any) -> None:
                         "Auto token refresh failed for workspace %s: %s",
                         org_id,
                         exc.message,
+                    )
+                    return
+                except Exception as exc:
+                    detail = f"unexpected refresh error: {exc}"
+                    session.rollback()
+                    managed_workspace = session.execute(
+                        select(Workspace).where(Workspace.org_id == org_id)
+                    ).scalar_one_or_none()
+                    if managed_workspace is not None:
+                        mark_workspace_refresh_failure(
+                            managed_workspace,
+                            detail,
+                            mode="auto",
+                        )
+                        session.commit()
+                        session.refresh(managed_workspace)
+                        workspace_event_broker.publish(
+                            "workspace_token_refresh_failed",
+                            org_id=managed_workspace.org_id,
+                            trigger="auto",
+                            summary=workspace_to_dict(managed_workspace, session),
+                            error={"message": detail},
+                        )
+                    logger.exception(
+                        "Auto token refresh crashed for workspace %s",
+                        org_id,
                     )
                     return
 

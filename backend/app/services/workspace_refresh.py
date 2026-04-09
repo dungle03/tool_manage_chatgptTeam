@@ -80,6 +80,10 @@ async def run_workspace_token_refresh_job(org_id: str) -> None:
                     trigger="manual",
                     summary=workspace_to_dict(workspace, session),
                 )
+                logger.info(
+                    "background refresh-token succeeded for workspace=%s",
+                    workspace.org_id,
+                )
             except TokenRefreshError as exc:
                 logger.warning(
                     "background refresh-token failed for workspace=%s detail=%s",
@@ -104,6 +108,32 @@ async def run_workspace_token_refresh_job(org_id: str) -> None:
                         trigger="manual",
                         summary=workspace_to_dict(managed_workspace, session),
                         error={"message": exc.message},
+                    )
+                return
+            except Exception as exc:
+                detail = f"unexpected refresh error: {exc}"
+                logger.exception(
+                    "background refresh-token crashed for workspace=%s",
+                    org_id,
+                )
+                session.rollback()
+                managed_workspace = session.execute(
+                    select(Workspace).where(Workspace.org_id == org_id)
+                ).scalar_one_or_none()
+                if managed_workspace is not None:
+                    mark_workspace_refresh_failure(
+                        managed_workspace,
+                        detail,
+                        mode="manual",
+                    )
+                    session.commit()
+                    session.refresh(managed_workspace)
+                    workspace_event_broker.publish(
+                        "workspace_token_refresh_failed",
+                        org_id=managed_workspace.org_id,
+                        trigger="manual",
+                        summary=workspace_to_dict(managed_workspace, session),
+                        error={"message": detail},
                     )
                 return
 

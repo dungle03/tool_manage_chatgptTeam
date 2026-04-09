@@ -594,6 +594,111 @@ def test_run_token_refresh_cycle_publishes_auto_refresh_success_event(
     assert refreshed_events[0]["trigger"] == "auto"
 
 
+def test_run_workspace_token_refresh_job_publishes_failure_event_on_unexpected_error(
+    seed_data, monkeypatch
+):
+    from app.services.workspace_refresh import run_workspace_token_refresh_job
+
+    events: list[dict] = []
+    original_publish = workspace_event_broker.publish
+
+    def capture_publish(event_type: str, **payload):
+        event = original_publish(event_type, **payload)
+        events.append(event)
+        return event
+
+    async def fake_run_token_refresher_for_workspace(_session, _workspace, mode):
+        assert mode == "manual"
+        raise RuntimeError("camoufox crashed")
+
+    monkeypatch.setattr(
+        "app.services.events.workspace_event_broker.publish",
+        capture_publish,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_refresh.run_token_refresher_for_workspace",
+        fake_run_token_refresher_for_workspace,
+    )
+
+    __import__("asyncio").run(run_workspace_token_refresh_job("org_001"))
+
+    failed_events = [
+        event for event in events if event["type"] == "workspace_token_refresh_failed"
+    ]
+    assert len(failed_events) == 1
+    assert failed_events[0]["org_id"] == "org_001"
+    assert failed_events[0]["trigger"] == "manual"
+    assert (
+        "unexpected refresh error: camoufox crashed"
+        == failed_events[0]["error"]["message"]
+    )
+
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        assert (
+            workspace.last_token_refresh_error
+            == "unexpected refresh error: camoufox crashed"
+        )
+    finally:
+        session.close()
+
+
+def test_run_token_refresh_cycle_publishes_failure_event_on_unexpected_error(
+    seed_data, monkeypatch
+):
+    from app.services.workspace_sync import run_token_refresh_cycle
+
+    events: list[dict] = []
+    original_publish = workspace_event_broker.publish
+
+    def capture_publish(event_type: str, **payload):
+        event = original_publish(event_type, **payload)
+        events.append(event)
+        return event
+
+    async def fake_run_token_refresher_for_workspace(_session, _workspace, mode):
+        assert mode == "auto"
+        raise RuntimeError("camoufox crashed")
+
+    monkeypatch.setattr(
+        "app.services.events.workspace_event_broker.publish",
+        capture_publish,
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.select_due_token_refresh_workspace_ids",
+        lambda _session: ["org_001"],
+    )
+    monkeypatch.setattr(
+        "app.services.workspace_sync.run_token_refresher_for_workspace",
+        fake_run_token_refresher_for_workspace,
+    )
+
+    __import__("asyncio").run(run_token_refresh_cycle(SessionLocal))
+
+    failed_events = [
+        event for event in events if event["type"] == "workspace_token_refresh_failed"
+    ]
+    assert len(failed_events) == 1
+    assert failed_events[0]["org_id"] == "org_001"
+    assert failed_events[0]["trigger"] == "auto"
+    assert (
+        "unexpected refresh error: camoufox crashed"
+        == failed_events[0]["error"]["message"]
+    )
+
+    session = SessionLocal()
+    try:
+        workspace = session.query(Workspace).filter(Workspace.org_id == "org_001").one()
+        assert (
+            workspace.last_token_refresh_error
+            == "unexpected refresh error: camoufox crashed"
+        )
+        assert workspace.token_refresh_fail_count == 1
+    finally:
+        session.close()
+
+
 def test_sync_workspace_data_skips_failure_persistence_when_workspace_was_deleted(
     seed_data, monkeypatch
 ):

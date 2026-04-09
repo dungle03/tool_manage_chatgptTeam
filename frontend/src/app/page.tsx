@@ -176,26 +176,29 @@ export default function DashboardPage() {
   >(null);
   const showToastRef = useRef<((title: string, message: string, tone?: ToastState["tone"], dedupeKey?: string) => void) | null>(null);
 
-  function showToast(
-    title: string,
-    message: string,
-    tone: ToastState["tone"] = "info",
-    dedupeKey?: string
-  ) {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((prev) => {
-      if (dedupeKey) {
-        const alreadyShown = prev.some((toast) => toast.dedupeKey === dedupeKey);
-        if (alreadyShown) {
-          return prev;
+  const showToast = useCallback(
+    (
+      title: string,
+      message: string,
+      tone: ToastState["tone"] = "info",
+      dedupeKey?: string
+    ) => {
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      setToasts((prev) => {
+        if (dedupeKey) {
+          const alreadyShown = prev.some((toast) => toast.dedupeKey === dedupeKey);
+          if (alreadyShown) {
+            return prev;
+          }
         }
-      }
-      return [...prev, { id, title, message, tone, dedupeKey }];
-    });
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, 3600);
-  }
+        return [...prev, { id, title, message, tone, dedupeKey }];
+      });
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, 3600);
+    },
+    []
+  );
 
   const updateWsState = useCallback(
     (
@@ -348,12 +351,23 @@ export default function DashboardPage() {
     detailRefreshTimersRef.current.set(orgId, timerId);
   }, []);
 
+  const refreshWorkspaceListForTokenEvents = useCallback(
+    (options?: { silent?: boolean; forceFresh?: boolean }) =>
+      loadWorkspacesRef.current?.(options),
+    []
+  );
+
+  const setWorkspaceSyncingForTokenEvents = useCallback(
+    (orgId: string, syncing: boolean) => updateWsState(orgId, { syncing }),
+    [updateWsState]
+  );
+
   const { clearTokenRefreshPolling, handleTokenRefreshEvent, startTokenRefreshPolling, stopTokenRefreshPolling } = useWorkspaceTokenRefreshLifecycle({
     applyWorkspaceSummary,
     mergeWorkspaceRecord,
-    refreshWorkspaceList: (options) => loadWorkspacesRef.current?.(options),
+    refreshWorkspaceList: refreshWorkspaceListForTokenEvents,
     scheduleWorkspaceDetailRefresh,
-    setWorkspaceSyncing: (orgId, syncing) => updateWsState(orgId, { syncing }),
+    setWorkspaceSyncing: setWorkspaceSyncingForTokenEvents,
     setWorkspaces,
     showToast,
   });
