@@ -111,6 +111,8 @@ function MemberTableComponent({
 }: MemberTableProps) {
   const [target, setTarget] = useState<Member | null>(null);
   const [kicking, setKicking] = useState(false);
+  const [bulkKickPending, setBulkKickPending] = useState(false);
+  const [bulkKickConfirmOpen, setBulkKickConfirmOpen] = useState(false);
 
   async function handleConfirmKick() {
     if (!target || !onKick) return;
@@ -128,6 +130,31 @@ function MemberTableComponent({
     [members]
   );
   const busyMemberIdSet = useMemo(() => new Set(busyMemberIds), [busyMemberIds]);
+
+  const bulkKickTargets = useMemo(
+    () =>
+      sortedMembers.filter(
+        (member) => isActiveMember(member.status) && member.role.toLowerCase() !== "owner"
+      ),
+    [sortedMembers]
+  );
+
+  async function handleConfirmBulkKick() {
+    if (!onKick || bulkKickTargets.length === 0) {
+      setBulkKickConfirmOpen(false);
+      return;
+    }
+
+    setBulkKickPending(true);
+    try {
+      for (const member of bulkKickTargets) {
+        await onKick(member.id);
+      }
+      setBulkKickConfirmOpen(false);
+    } finally {
+      setBulkKickPending(false);
+    }
+  }
 
   if (members.length === 0) {
     return (
@@ -158,7 +185,20 @@ function MemberTableComponent({
             <h3 className="section-heading">Members</h3>
             <p className="section-description">Danh sách thành viên hiện tại của workspace.</p>
           </div>
-          <div className="section-count">{members.length} người</div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            {onKick && bulkKickTargets.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => setBulkKickConfirmOpen(true)}
+                disabled={bulkKickPending || busyMemberIds.length > 0}
+                id="bulk-kick-members"
+              >
+                {bulkKickPending ? "Đang kick hàng loạt..." : `Kick all (${bulkKickTargets.length})`}
+              </button>
+            )}
+            <div className="section-count">{members.length} người</div>
+          </div>
         </div>
 
         <table className="data-table">
@@ -206,7 +246,7 @@ function MemberTableComponent({
                           <button
                             className={`action-btn action-btn-kick${isBusy ? " action-btn-loading" : ""}`}
                             onClick={() => setTarget(member)}
-                            disabled={isBusy}
+                            disabled={isBusy || bulkKickPending}
                           >
                             {isBusy ? "Removing..." : "Kick"}
                           </button>
@@ -234,6 +274,25 @@ function MemberTableComponent({
               </button>
               <button className="btn btn-danger" onClick={handleConfirmKick} disabled={kicking}>
                 {kicking ? "Đang xóa..." : "Xóa thành viên"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkKickConfirmOpen && (
+        <div className="confirm-overlay" onClick={() => !bulkKickPending && setBulkKickConfirmOpen(false)}>
+          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h4>Xác nhận kick toàn bộ thành viên</h4>
+            <p>
+              Bạn có chắc muốn kick toàn bộ <strong>{bulkKickTargets.length}</strong> thành viên hiện tại có thể xóa khỏi workspace không?
+            </p>
+            <div className="confirm-actions">
+              <button className="btn btn-ghost" onClick={() => setBulkKickConfirmOpen(false)} disabled={bulkKickPending}>
+                Hủy
+              </button>
+              <button className="btn btn-danger" onClick={handleConfirmBulkKick} disabled={bulkKickPending}>
+                {bulkKickPending ? "Đang kick hàng loạt..." : "Kick all members"}
               </button>
             </div>
           </div>
