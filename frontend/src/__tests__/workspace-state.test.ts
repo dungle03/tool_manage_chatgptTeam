@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Invite, Member, Workspace } from "@/types/api";
 import {
   applyWorkspaceSummaryList,
+  mergeInviteLists,
   mergeWorkspaceRecordList,
   removeInvite,
   removeMember,
@@ -82,6 +83,23 @@ describe("workspace state helpers", () => {
 
     expect(result).toHaveLength(2);
     expect(result[0].status).toBe("accepted");
+  });
+
+  it("merges refreshed invite lists without dropping local pending invites", () => {
+    const localPendingInvite: Invite = {
+      id: 3,
+      org_id: "org_001",
+      email: "tool-created@company.com",
+      invite_id: "inv_tool",
+      status: "pending",
+      created_at: "2026-03-13T00:00:00+00:00",
+    };
+
+    const result = mergeInviteLists([localPendingInvite, inviteA], [inviteA]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].email).toBe("tool-created@company.com");
+    expect(result[1].email).toBe("a@company.com");
   });
 
   it("replaces a matching invite by id or email", () => {

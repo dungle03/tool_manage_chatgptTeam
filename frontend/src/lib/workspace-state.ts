@@ -78,6 +78,29 @@ export function upsertInvite(invites: Invite[], invite: Invite): Invite[] {
   return [invite, ...withoutDuplicate];
 }
 
+export function mergeInviteLists(currentInvites: Invite[], incomingInvites: Invite[]): Invite[] {
+  const merged = [...incomingInvites];
+
+  for (const invite of currentInvites) {
+    const alreadyIncluded = merged.some(
+      (item) => item.invite_id === invite.invite_id || item.email === invite.email,
+    );
+    if (alreadyIncluded) {
+      continue;
+    }
+    if (invite.status !== "pending") {
+      continue;
+    }
+    merged.push(invite);
+  }
+
+  return merged.sort((a, b) => {
+    const timeA = parseDateValue(a.created_at) ?? 0;
+    const timeB = parseDateValue(b.created_at) ?? 0;
+    return timeB - timeA;
+  });
+}
+
 export function replaceInvite(invites: Invite[], inviteId: string, updatedInvite: Invite): Invite[] {
   return invites.map((invite) =>
     invite.invite_id === inviteId || invite.email === updatedInvite.email
