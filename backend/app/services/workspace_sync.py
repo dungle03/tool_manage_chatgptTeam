@@ -91,13 +91,39 @@ def build_refresh_hint(
     return payload
 
 
+def normalize_invite_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"", "0", "1", "2", "3", "4", "5"}:
+        numeric_map = {
+            "0": "pending",
+            "1": "pending",
+            "2": "pending",
+            "3": "accepted",
+            "4": "expired",
+            "5": "cancelled",
+            "": "pending",
+        }
+        return numeric_map[normalized]
+
+    if normalized in {"pending", "invited", "open", "sent"}:
+        return "pending"
+    if normalized in {"accepted", "active", "completed", "joined"}:
+        return "accepted"
+    if normalized in {"expired", "timeout", "timed_out"}:
+        return "expired"
+    if normalized in {"cancelled", "canceled", "revoked", "declined"}:
+        return "cancelled"
+
+    return normalized or "pending"
+
+
 def serialize_invite_row(invite: Invite) -> dict[str, Any]:
     return {
         "id": invite.id,
         "org_id": invite.org_id,
         "email": invite.email,
         "invite_id": invite.invite_id,
-        "status": invite.status,
+        "status": normalize_invite_status(invite.status),
         "created_by_tool": bool(invite.created_by_tool),
         "created_at": serialize_datetime(invite.created_at),
     }
@@ -810,7 +836,9 @@ async def sync_workspace_data(
                 if existing_invite:
                     existing_invite.email = email
                     existing_invite.invite_id = invite_id
-                    existing_invite.status = item.get("status") or "pending"
+                    existing_invite.status = normalize_invite_status(
+                        item.get("status") or "pending"
+                    )
                     existing_invite.created_at = (
                         created_at or existing_invite.created_at
                     )
@@ -820,7 +848,7 @@ async def sync_workspace_data(
                         org_id=workspace.org_id,
                         email=email,
                         invite_id=invite_id,
-                        status=item.get("status") or "pending",
+                        status=normalize_invite_status(item.get("status") or "pending"),
                         created_by_tool=False,
                         created_at=created_at or datetime.now(timezone.utc),
                     )

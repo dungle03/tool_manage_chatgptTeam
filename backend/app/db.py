@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection
@@ -6,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import Base
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./workspace_manager.db")
+DEFAULT_SQLITE_PATH = Path(__file__).resolve().parent.parent / "workspace_manager.db"
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH.as_posix()}"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 # SQLite needs check_same_thread=False; PostgreSQL does not
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}

@@ -18,6 +18,8 @@ Tài liệu này dùng cho người vận hành hoặc người maintain dự á
 - Dữ liệu member/invite/workspace được chốt ở backend
 - Frontend chỉ áp dụng cập nhật cục bộ để phản hồi nhanh hơn
 - Sau mutation, frontend vẫn dựa vào `updated_summary`, `updated_record`, `refresh_hint` và/hoặc refresh hẹp để đồng bộ lại
+- SQLite local chuẩn hiện tại là `backend/workspace_manager.db`
+- Nếu repo đang có thêm một file `workspace_manager.db` ở root, không nên giả định app đang dùng file đó
 
 ### Frontend local state chỉ là lớp hiển thị tạm
 
@@ -117,6 +119,7 @@ Nếu backend trả `refresh_hint`, frontend nên đi theo scope đó thay vì t
 1. Xem local optimistic update có conflict với refresh hẹp hay SSE không
 2. Xem backend có đang trả summary/record cũ không
 3. Ưu tiên fix ở backend contract trước khi thêm vá ở frontend
+4. Nếu vừa đổi DB path hoặc restore backup SQLite, restart backend rồi test lại trước khi kết luận là bug logic
 
 ---
 

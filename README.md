@@ -192,19 +192,22 @@ Mở trình duyệt tại: [http://localhost:3000](http://localhost:3000)
 
 ### Backend (`backend/.env`)
 
-| Biến                                        | Mặc định                           | Mục đích                                      |
-| ------------------------------------------- | ---------------------------------- | --------------------------------------------- |
-| `DATABASE_URL`                              | `sqlite:///./workspace_manager.db` | Chuỗi kết nối database backend                |
-| `SYNC_LOOP_INTERVAL_SECONDS`                | `5`                                | Chu kỳ vòng lặp nền chính                     |
-| `SYNC_STALE_MINUTES`                        | `5`                                | Ngưỡng xác định workspace stale               |
-| `SYNC_PENDING_INVITE_SECONDS`               | `15`                               | Tăng tần suất kiểm tra khi có invite pending  |
-| `SYNC_BASELINE_MINUTES`                     | `5`                                | Chu kỳ refresh nền cơ bản                     |
-| `SYNC_HOT_WINDOW_SECONDS`                   | `180`                              | Thời gian workspace được giữ ở trạng thái hot |
-| `SYNC_FOLLOWUP_STEPS`                       | `5,15,30,60`                       | Các mốc follow-up sync sau action quan trọng  |
-| `SYNC_ERROR_RETRY_STEPS`                    | `10,30,60`                         | Các mốc retry sau khi sync lỗi                |
-| `SYNC_MAX_PARALLEL_WORKSPACES`              | `2`                                | Số workspace sync song song tối đa            |
-| `ADMIN_TOKEN`                               | chưa đặt                           | Bảo vệ các admin endpoint                     |
-| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | chưa đặt                           | Tắt background sync khi test hoặc chạy cô lập |
+| Biến                                        | Mặc định                                                                                                                                    | Mục đích                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `DATABASE_URL`                              | `sqlite:///C:/.../tool_manage_chatgptTeam/backend/workspace_manager.db` _(nếu không set thì app tự neo vào `backend/workspace_manager.db`)_ | Chuỗi kết nối database backend                |
+| `SYNC_LOOP_INTERVAL_SECONDS`                | `5`                                                                                                                                         | Chu kỳ vòng lặp nền chính                     |
+| `SYNC_STALE_MINUTES`                        | `5`                                                                                                                                         | Ngưỡng xác định workspace stale               |
+| `SYNC_PENDING_INVITE_SECONDS`               | `15`                                                                                                                                        | Tăng tần suất kiểm tra khi có invite pending  |
+| `SYNC_BASELINE_MINUTES`                     | `5`                                                                                                                                         | Chu kỳ refresh nền cơ bản                     |
+| `SYNC_HOT_WINDOW_SECONDS`                   | `180`                                                                                                                                       | Thời gian workspace được giữ ở trạng thái hot |
+| `SYNC_FOLLOWUP_STEPS`                       | `5,15,30,60`                                                                                                                                | Các mốc follow-up sync sau action quan trọng  |
+| `SYNC_ERROR_RETRY_STEPS`                    | `10,30,60`                                                                                                                                  | Các mốc retry sau khi sync lỗi                |
+| `SYNC_MAX_PARALLEL_WORKSPACES`              | `2`                                                                                                                                         | Số workspace sync song song tối đa            |
+| `ADMIN_TOKEN`                               | chưa đặt                                                                                                                                    | Bảo vệ các admin endpoint                     |
+| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | chưa đặt                                                                                                                                    | Tắt background sync khi test hoặc chạy cô lập |
+
+> Lưu ý: SQLite local chuẩn hiện tại là `backend/workspace_manager.db`.
+> Không nên giữ thêm một file `workspace_manager.db` ở root repo rồi trông chờ app tự dùng đúng file đó, vì rất dễ gây lệch dữ liệu giữa các lần chạy.
 
 ### Frontend (`frontend/.env.local`)
 
@@ -341,6 +344,8 @@ python -m pytest tests -vv
 - Luồng xóa workspace hiện tại là xóa khỏi hệ thống quản lý cục bộ; nếu cần xem hành vi xóa upstream thì nên review riêng.
 - Auto-kick unauthorized member phụ thuộc vào remote member identifier từ payload upstream.
 - Tạo invite hiện đã idempotent với trường hợp upstream trả về `invite_id` bị trùng.
+- Backend local SQLite mặc định luôn neo về `backend/workspace_manager.db` nếu `DATABASE_URL` không được set.
+- Nếu vừa thay đổi `DATABASE_URL`, đổi file DB, hoặc restore backup SQLite, nên restart backend để tránh process cũ tiếp tục giữ state/runtime không còn đúng.
 
 Khi cần debug realtime/background sync, nên bắt đầu với:
 

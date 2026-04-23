@@ -191,19 +191,22 @@ Open: [http://localhost:3000](http://localhost:3000)
 
 ### Backend (`backend/.env`)
 
-| Variable                                    | Default                            | Purpose                                          |
-| ------------------------------------------- | ---------------------------------- | ------------------------------------------------ |
-| `DATABASE_URL`                              | `sqlite:///./workspace_manager.db` | Backend database connection string               |
-| `SYNC_LOOP_INTERVAL_SECONDS`                | `5`                                | Main background loop interval                    |
-| `SYNC_STALE_MINUTES`                        | `5`                                | Threshold to mark a workspace stale              |
-| `SYNC_PENDING_INVITE_SECONDS`               | `15`                               | Faster polling when pending invites exist        |
-| `SYNC_BASELINE_MINUTES`                     | `5`                                | Baseline background refresh interval             |
-| `SYNC_HOT_WINDOW_SECONDS`                   | `180`                              | Duration a workspace stays in hot state          |
-| `SYNC_FOLLOWUP_STEPS`                       | `5,15,30,60`                       | Follow-up sync checkpoints after key actions     |
-| `SYNC_ERROR_RETRY_STEPS`                    | `10,30,60`                         | Retry checkpoints after sync failure             |
-| `SYNC_MAX_PARALLEL_WORKSPACES`              | `2`                                | Maximum parallel workspace sync count            |
-| `ADMIN_TOKEN`                               | unset                              | Protects admin endpoints                         |
-| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | unset                              | Disables background sync for isolated runs/tests |
+| Variable                                    | Default                                                                                                                                          | Purpose                                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `DATABASE_URL`                              | `sqlite:///C:/.../tool_manage_chatgptTeam/backend/workspace_manager.db` _(when unset, the app anchors itself to `backend/workspace_manager.db`)_ | Backend database connection string               |
+| `SYNC_LOOP_INTERVAL_SECONDS`                | `5`                                                                                                                                              | Main background loop interval                    |
+| `SYNC_STALE_MINUTES`                        | `5`                                                                                                                                              | Threshold to mark a workspace stale              |
+| `SYNC_PENDING_INVITE_SECONDS`               | `15`                                                                                                                                             | Faster polling when pending invites exist        |
+| `SYNC_BASELINE_MINUTES`                     | `5`                                                                                                                                              | Baseline background refresh interval             |
+| `SYNC_HOT_WINDOW_SECONDS`                   | `180`                                                                                                                                            | Duration a workspace stays in hot state          |
+| `SYNC_FOLLOWUP_STEPS`                       | `5,15,30,60`                                                                                                                                     | Follow-up sync checkpoints after key actions     |
+| `SYNC_ERROR_RETRY_STEPS`                    | `10,30,60`                                                                                                                                       | Retry checkpoints after sync failure             |
+| `SYNC_MAX_PARALLEL_WORKSPACES`              | `2`                                                                                                                                              | Maximum parallel workspace sync count            |
+| `ADMIN_TOKEN`                               | unset                                                                                                                                            | Protects admin endpoints                         |
+| `WORKSPACE_MANAGER_DISABLE_BACKGROUND_SYNC` | unset                                                                                                                                            | Disables background sync for isolated runs/tests |
+
+> Note: the canonical local SQLite file is now `backend/workspace_manager.db`.
+> Avoid leaving an extra `workspace_manager.db` at the repository root and assuming the app will pick the right one automatically, because it can cause silent data drift between runs.
 
 ### Frontend (`frontend/.env.local`)
 
@@ -340,6 +343,8 @@ python -m pytest tests -vv
 - The current workspace delete flow is local-management deletion; review upstream behavior separately before treating it as a remote destructive action.
 - Unauthorized-member auto-kick relies on remote member identifiers from upstream payloads.
 - Invite creation is idempotent against duplicate upstream `invite_id` values.
+- The default backend-local SQLite path is always anchored to `backend/workspace_manager.db` unless `DATABASE_URL` overrides it.
+- If you change `DATABASE_URL`, swap SQLite files, or restore a backup, restart the backend so an older process does not keep stale runtime state.
 
 For realtime and background sync debugging, start with:
 
