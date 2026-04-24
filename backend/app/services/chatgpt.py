@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import jwt
-from jwt import PyJWTError
 from curl_cffi.requests import AsyncSession
 
 

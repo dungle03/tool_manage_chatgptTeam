@@ -305,18 +305,28 @@ Các cột export:
 
 ---
 
-## Chạy test
+## Chạy kiểm tra chất lượng
 
-### Frontend
+### Một lệnh tổng hợp
+
+Khuyến nghị chạy từ root repo:
 
 ```powershell
-npm test
+.\run_quality_checks.ps1
 ```
 
-Nếu cần build production:
+Script này sẽ chạy:
+
+1. Backend lint bằng Ruff.
+2. Backend regression tests bằng pytest trong `backend/venv`.
+3. Frontend TypeScript check.
+4. Frontend tests bằng Vitest.
+
+Có thể bỏ qua từng phần khi cần:
 
 ```powershell
-npm run build
+.\run_quality_checks.ps1 -SkipBackend
+.\run_quality_checks.ps1 -SkipFrontend
 ```
 
 ### Backend
@@ -324,16 +334,43 @@ npm run build
 Khuyến nghị:
 
 ```powershell
-./run_backend_tests.ps1
+.\run_backend_tests.ps1
 ```
 
-Cách khác:
+Cách khác, chạy từ thư mục `backend/`:
 
 ```powershell
-python -m pytest tests -vv
+.\venv\Scripts\python.exe -m pytest
+```
+
+Lint Python từ root repo:
+
+```powershell
+.\backend\venv\Scripts\python.exe -m ruff check backend
 ```
 
 > Không nên chạy `python -m pytest backend/tests` từ thư mục gốc repo vì dễ chạy sai context và tạo cảm giác test bị treo.
+
+### Frontend
+
+Chạy từ thư mục `frontend/`:
+
+```powershell
+npm run typecheck
+npm test
+```
+
+Hoặc dùng script gộp:
+
+```powershell
+npm run verify
+```
+
+Nếu cần build production:
+
+```powershell
+npm run build
+```
 
 ---
 

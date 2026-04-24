@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "test": "node ./scripts/run-vitest.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test"
   },
   "dependencies": {
     "next": "^14.2.0",

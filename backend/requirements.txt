@@ -8,3 +8,4 @@ python-dotenv
 curl-cffi
 pyjwt
 cryptography
+ruff

@@ -304,18 +304,28 @@ Exported fields:
 
 ---
 
-## Testing
+## Quality Checks
 
-### Frontend
+### One-command local verification
+
+Recommended from the repository root:
 
 ```powershell
-npm test
+.\run_quality_checks.ps1
 ```
 
-Production build check:
+This script runs:
+
+1. Backend lint with Ruff.
+2. Backend regression tests with pytest from `backend/venv`.
+3. Frontend TypeScript check.
+4. Frontend tests with Vitest.
+
+You can skip either side when needed:
 
 ```powershell
-npm run build
+.\run_quality_checks.ps1 -SkipBackend
+.\run_quality_checks.ps1 -SkipFrontend
 ```
 
 ### Backend
@@ -323,16 +333,43 @@ npm run build
 Recommended:
 
 ```powershell
-./run_backend_tests.ps1
+.\run_backend_tests.ps1
 ```
 
-Alternative:
+Alternative from the `backend/` directory:
 
 ```powershell
-python -m pytest tests -vv
+.\venv\Scripts\python.exe -m pytest
+```
+
+Python lint from the repository root:
+
+```powershell
+.\backend\venv\Scripts\python.exe -m ruff check backend
 ```
 
 > Avoid running `python -m pytest backend/tests` from the repository root. It can run in the wrong context and appear to hang.
+
+### Frontend
+
+Run from the `frontend/` directory:
+
+```powershell
+npm run typecheck
+npm test
+```
+
+Or use the combined script:
+
+```powershell
+npm run verify
+```
+
+Production build check:
+
+```powershell
+npm run build
+```
 
 ---
 

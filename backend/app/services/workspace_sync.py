@@ -10,7 +10,7 @@ from app.models import Workspace
 from app.services.chatgpt import chatgpt_service
 from app.services.events import workspace_event_broker
 from app.services.token_refresher import (
-    is_workspace_token_refresh_in_progress,
+    is_workspace_token_refresh_in_progress as is_workspace_token_refresh_in_progress,
     run_token_refresher_for_workspace,
     select_due_token_refresh_workspace_ids,
     verify_refreshed_token_for_workspace,
@@ -29,17 +29,17 @@ from app.services.workspace_members import (
 )
 from app.services.workspace_schedule import compute_workspace_priority
 from app.services.workspace_summaries import (
-    build_workspace_list_payload,
+    build_workspace_list_payload as build_workspace_list_payload,
     normalize_identity,
     pending_invite_count as _pending_invite_count,
     workspace_to_dict,
 )
 from app.services.workspace_serializers import (
     build_refresh_hint,
-    normalize_invite_status,
-    serialize_invite_row,
-    serialize_member_row,
-    serialize_unauthorized_finding_row,
+    normalize_invite_status as normalize_invite_status,
+    serialize_invite_row as serialize_invite_row,
+    serialize_member_row as serialize_member_row,
+    serialize_unauthorized_finding_row as serialize_unauthorized_finding_row,
 )
 from app.services.workspace_sync_background import (
     list_stale_workspace_ids as _list_stale_workspace_ids,
@@ -54,7 +54,7 @@ from app.services.workspace_sync_results import (
 )
 from app.services.workspace_sync_scheduling import (
     publish_schedule_event,
-    schedule_followup_sync,
+    schedule_followup_sync as schedule_followup_sync,
     schedule_next_sync_after_success,
     schedule_retry_after_failure,
 )
