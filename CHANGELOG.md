@@ -1,5 +1,26 @@
 # Changelog
 
+## [2026-04-25]
+
+### Added
+
+- `pyproject.toml` cấu hình Ruff cho backend theo hướng correctness-first.
+- `run_quality_checks.ps1` làm local CI-like entrypoint cho lint/test backend và verify frontend.
+- `npm run verify` ở frontend để gom typecheck và test.
+
+### Changed
+
+- Hoàn tất roadmap refactor Workspace Service đến Phase 3: quality tooling.
+- `workspace_sync.py` được giữ làm facade/orchestrator tương thích, còn domain logic đã tách sang các module nhỏ hơn.
+- README tiếng Việt và tiếng Anh được cập nhật hướng dẫn quality checks.
+- Đồng bộ lại `.brain/brain.json`, `.brain/session.json`, và `.brain/handover.md` sau khi hoàn tất Phase 3.
+
+### Fixed
+
+- Dọn unused imports trong app services để Ruff E/F gate pass.
+- Khôi phục các public facade re-export trong `workspace_sync.py` bằng explicit aliases để không break router imports.
+- Force-add `run_quality_checks.ps1` vì root helper script bị `.gitignore` ignore.
+
 ## [2026-04-09]
 
 ### Added
