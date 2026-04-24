@@ -16,7 +16,9 @@ describe("ImportDialog", () => {
     const user = userEvent.setup();
     const onImported = vi.fn();
 
-    let releaseFirstSync: (() => void) | null = null;
+    let releaseFirstSync: () => void = () => {
+      throw new Error("Expected first workspace sync to be pending");
+    };
     syncWorkspaceMock.mockImplementation((orgId: string) => {
       if (orgId === "org_1") {
         return new Promise<void>((resolve) => {
@@ -48,7 +50,7 @@ describe("ImportDialog", () => {
     expect(syncWorkspaceMock).toHaveBeenCalledWith("org_1");
     expect(syncWorkspaceMock).toHaveBeenCalledWith("org_2");
 
-    releaseFirstSync?.();
+    releaseFirstSync();
 
     expect(await screen.findByText("Import thành công!")).toBeInTheDocument();
     expect(screen.getByText(/Alpha Team/)).toBeInTheDocument();

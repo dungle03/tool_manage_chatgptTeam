@@ -14,7 +14,7 @@ type WorkspaceDetailPanelProps = {
   inviteActionState: Record<string, "resend" | "revoke">;
   invitePanel: ReactNode;
   onSync: () => void;
-  onKick?: (memberId: number) => void;
+  onKick?: (memberId: number) => Promise<void>;
   onResend?: (inviteId: string, email: string) => Promise<void>;
   onRevoke?: (inviteId: string) => Promise<void>;
   includePendingInvitesInLoadGate?: boolean;

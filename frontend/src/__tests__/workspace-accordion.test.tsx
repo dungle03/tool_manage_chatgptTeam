@@ -6,6 +6,7 @@ it("toggles accordion content and shows current status label", async () => {
   const user = userEvent.setup();
   render(
     <WorkspaceCard
+      orgId="org_alpha"
       title="ChatGPT Team Alpha"
       members={4}
       memberLimit={7}

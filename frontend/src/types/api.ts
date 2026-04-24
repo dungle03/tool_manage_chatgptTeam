@@ -165,7 +165,7 @@ export type WorkspaceRenameResult = MutationResult<never> & {
 export type WorkspaceTokenUpdateResult = MutationResult<never>;
 
 export type WorkspaceTokenRefreshResult = MutationResult<never> & {
-  status: "success" | "partial_success" | "failed" | "in_progress";
+  status: "success" | "partial_success" | "failed" | "accepted" | "in_progress";
   message: string;
   workspace_id: string;
   owner_email?: string;

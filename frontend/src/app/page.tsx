@@ -8,138 +8,47 @@ import { InvitePanel } from "@/components/invite-panel";
 import { ImportDialog } from "@/components/import-dialog";
 import { DashboardViewToggle, type DashboardViewMode } from "@/components/dashboard-view-toggle";
 import { CompactWorkspaceCard } from "@/components/compact-workspace-card";
+import { GlobalUnauthorizedAlert } from "@/components/global-unauthorized-alert";
 import { RenameWorkspaceDialog } from "@/components/rename-workspace-dialog";
+import { ToastStack } from "@/components/toast-stack";
 import { UpdateTokenDialog } from "@/components/update-token-dialog";
 import {
-  buildWorkspaceEventsUrl,
   getWorkspaces,
   getWorkspaceMembers,
   invalidateApiCache,
-  kickMember,
-  listAllUnauthorizedFindings,
   listInvites,
-  parseWorkspaceEvent,
-  syncWorkspace,
-  deleteWorkspace,
-  resendInvite,
-  cancelInvite,
-  renameWorkspace,
-  refreshWorkspaceToken,
-  updateWorkspaceToken,
 } from "@/lib/api";
+import {
+  formatDashboardDateLabel,
+  formatDashboardSyncTime,
+  getActionErrorCopy,
+} from "@/lib/dashboard-formatters";
 import { useWorkspaceTokenRefreshLifecycle } from "@/lib/use-workspace-token-refresh";
-import type { GlobalUnauthorizedFinding } from "@/lib/api";
+import { useDashboardToasts, type ToastTone } from "@/lib/use-dashboard-toasts";
+import { useGlobalUnauthorizedFindings } from "@/lib/use-global-unauthorized-findings";
+import { useWorkspaceEvents } from "@/lib/use-workspace-events";
 import {
   applyWorkspaceSummaryList,
   compareWorkspaceExpiry,
   mergeInviteLists,
   mergeWorkspaceRecordList,
-  removeInvite,
-  removeMember,
-  replaceInvite,
   upsertInvite,
 } from "@/lib/workspace-state";
-import type { Workspace, Member, Invite, WorkspaceEvent } from "@/types/api";
-
-type WorkspaceState = {
-  members: Member[];
-  invites: Invite[];
-  loadedMembers: boolean;
-  syncing: boolean;
-  busyMemberIds: number[];
-  inviteActionState: Record<string, "resend" | "revoke">;
-};
-
-type ToastState = {
-  id: number;
-  title: string;
-  message: string;
-  tone: "success" | "error" | "info";
-  dedupeKey?: string;
-};
-
-const DEFAULT_WS_STATE: WorkspaceState = {
-  members: [],
-  invites: [],
-  loadedMembers: false,
-  syncing: false,
-  busyMemberIds: [],
-  inviteActionState: {},
-};
+import { DEFAULT_WS_STATE, type WorkspaceState } from "@/lib/workspace-dashboard-state";
+import { useWorkspaceLoadAndSync } from "@/lib/use-workspace-load-and-sync";
+import { useWorkspaceMemberInviteActions } from "@/lib/use-workspace-member-invite-actions";
+import { useWorkspaceDeleteAction } from "@/lib/use-workspace-delete-action";
+import { useWorkspaceRenameAction } from "@/lib/use-workspace-rename-action";
+import { useWorkspaceTokenActions } from "@/lib/use-workspace-token-actions";
+import { useWorkspaceRealtimeHandlers } from "@/lib/use-workspace-realtime-handlers";
+import type { Workspace } from "@/types/api";
 
 const EVENT_REFRESH_WINDOW_MS = 450;
-const RECOVERY_REFRESH_COOLDOWN_MS = 5_000;
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "Lỗi không xác định";
-}
-
-function formatDashboardSyncTime(lastSync?: string | null): string {
-  if (!lastSync) return "Chưa sync";
-  const diff = Math.floor((Date.now() - new Date(lastSync).getTime()) / 1000);
-  if (diff < 60) return `${diff}s trước`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m trước`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h trước`;
-  return `${Math.floor(diff / 86400)}d trước`;
-}
-
-function formatDashboardDateLabel(prefix: string, timestamp?: string | null): string {
-  if (!timestamp) return `${prefix}: Chưa rõ`;
-
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return `${prefix}: Chưa rõ`;
-  }
-
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const year = date.getUTCFullYear();
-  return `${prefix}: ${day}/${month}/${year}`;
-}
-
-function getActionErrorCopy(
-  action: "sync" | "kick" | "resend" | "revoke" | "delete_workspace" | "rename_workspace",
-  error: unknown
-): string {
-  const detail = getErrorMessage(error);
-
-  if (detail.includes("HTTP 404")) {
-    return "Dữ liệu liên quan không còn tồn tại hoặc dashboard đang hiển thị bản cũ. Hãy tải lại danh sách.";
-  }
-
-  if (detail.includes("HTTP 409") || detail.includes("cannot remove owner")) {
-    return "Thao tác bị chặn vì dữ liệu hiện tại không cho phép thực hiện bước này.";
-  }
-
-  if (detail.includes("HTTP 401") || detail.includes("HTTP 403")) {
-    return "Token hiện tại không hợp lệ hoặc đã hết hạn. Hãy kiểm tra lại phiên làm việc rồi thử lại.";
-  }
-
-  if (detail.includes("HTTP 500") || detail.includes("HTTP 502")) {
-    return `Backend hoặc dịch vụ đồng bộ đang lỗi: ${detail}`;
-  }
-
-  const fallbackByAction = {
-    sync: "Workspace chưa thể đồng bộ ở thời điểm này.",
-    kick: "Chưa thể xóa thành viên ở thời điểm này.",
-    resend: "Chưa thể gửi lại lời mời ở thời điểm này.",
-    revoke: "Chưa thể thu hồi lời mời ở thời điểm này.",
-    delete_workspace: "Chưa thể xóa workspace ở thời điểm này.",
-    rename_workspace: "Chưa thể đổi tên workspace ở thời điểm này.",
-  } satisfies Record<typeof action, string>;
-
-  return detail === "Lỗi không xác định"
-    ? fallbackByAction[action]
-    : `${fallbackByAction[action]} Chi tiết: ${detail}`;
-}
 
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [wsStates, setWsStates] = useState<Record<string, WorkspaceState>>({});
-  const [toasts, setToasts] = useState<ToastState[]>([]);
+  const { toasts, showToast, dismissToast } = useDashboardToasts();
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [viewMode, setViewMode] = useState<DashboardViewMode>("compact");
@@ -153,17 +62,15 @@ export default function DashboardPage() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [deletingWs, setDeletingWs] = useState<Workspace | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [globalUnauthorizedFindings, setGlobalUnauthorizedFindings] = useState<GlobalUnauthorizedFinding[]>([]);
-  const [unauthorizedBannerDismissed, setUnauthorizedBannerDismissed] = useState(false);
+  const {
+    findings: globalUnauthorizedFindings,
+    dismissed: unauthorizedBannerDismissed,
+    refreshFindings: refreshGlobalUnauthorizedFindings,
+    dismissFindings: dismissGlobalUnauthorizedFindings,
+  } = useGlobalUnauthorizedFindings();
 
-  const inflightMemberLoads = useRef(new Map<string, Promise<void>>());
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const seenEventSequencesRef = useRef(new Set<number>());
   const detailRefreshTimersRef = useRef(new Map<string, number>());
   const workspaceRefreshTimerRef = useRef<number | null>(null);
-  const lastRecoveryRefreshAtRef = useRef(0);
   const workspaceListRequestVersionRef = useRef(0);
   const workspaceDetailRequestVersionRef = useRef(new Map<string, number>());
   const wsStatesRef = useRef<Record<string, WorkspaceState>>({});
@@ -174,32 +81,9 @@ export default function DashboardPage() {
   const triggerPostActionRefreshRef = useRef<
     ((orgId?: string, options?: { immediate?: boolean; includeDetails?: boolean }) => Promise<void>) | null
   >(null);
-  const showToastRef = useRef<((title: string, message: string, tone?: ToastState["tone"], dedupeKey?: string) => void) | null>(null);
-
-  const showToast = useCallback(
-    (
-      title: string,
-      message: string,
-      tone: ToastState["tone"] = "info",
-      dedupeKey?: string
-    ) => {
-      const id = Date.now() + Math.floor(Math.random() * 1000);
-      setToasts((prev) => {
-        if (dedupeKey) {
-          const alreadyShown = prev.some((toast) => toast.dedupeKey === dedupeKey);
-          if (alreadyShown) {
-            return prev;
-          }
-        }
-        return [...prev, { id, title, message, tone, dedupeKey }];
-      });
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== id));
-      }, 3600);
-    },
-    []
-  );
-
+  const showToastRef = useRef<
+    ((title: string, message: string, tone?: ToastTone, dedupeKey?: string) => void) | null
+  >(null);
   const updateWsState = useCallback(
     (
       orgId: string,
@@ -333,8 +217,6 @@ export default function DashboardPage() {
     }, delayMs);
   }, []);
 
-
-
   const scheduleWorkspaceDetailRefresh = useCallback((orgId: string) => {
     const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
     if (!state.loadedMembers) {
@@ -401,215 +283,89 @@ export default function DashboardPage() {
     [scheduleWorkspaceDetailRefresh, scheduleWorkspaceListRefresh]
   );
 
+  const { handleSync, loadMembers } = useWorkspaceLoadAndSync({
+    applyWorkspaceSummary,
+    showToast,
+    triggerPostActionRefresh,
+    updateWsState,
+    wsStatesRef,
+  });
+
+  const { handleKick, handleResendInvite, handleRevokeInvite } = useWorkspaceMemberInviteActions({
+    applyWorkspaceSummary,
+    showToast,
+    triggerPostActionRefresh,
+    updateWsState,
+    wsStatesRef,
+  });
+
+  const { handleConfirmDelete } = useWorkspaceDeleteAction({
+    deletingWs,
+    focusedWorkspaceId,
+    setDeleting,
+    setDeletingWs,
+    setFocusedWorkspaceId,
+    setWorkspaces,
+    setWsStates,
+    showToast,
+    triggerPostActionRefresh,
+  });
+
+  const { handleRenameWorkspace } = useWorkspaceRenameAction({
+    applyWorkspaceSummary,
+    mergeWorkspaceRecord,
+    renamingWorkspace,
+    setRenameError,
+    setRenameSubmitting,
+    setRenamingWorkspace,
+    showToast,
+    triggerPostActionRefreshRef,
+  });
+
+  const { handleRefreshWorkspaceToken, handleUpdateWorkspaceToken } = useWorkspaceTokenActions({
+    applyWorkspaceSummary,
+    mergeWorkspaceRecord,
+    setTokenError,
+    setTokenSubmitting,
+    setTokenWorkspace,
+    showToast,
+    startTokenRefreshPolling,
+    stopTokenRefreshPolling,
+    tokenWorkspace,
+    triggerPostActionRefreshRef,
+  });
+
   useEffect(() => {
     triggerPostActionRefreshRef.current = triggerPostActionRefresh;
   }, [triggerPostActionRefresh]);
 
-  const recoverDashboardState = useCallback(async () => {
-    const now = Date.now();
-    if (now - lastRecoveryRefreshAtRef.current < RECOVERY_REFRESH_COOLDOWN_MS) {
-      return;
-    }
-    lastRecoveryRefreshAtRef.current = now;
+  const { handleWorkspaceEvent, handleWorkspaceEventsReconnect, recoverDashboardState } = useWorkspaceRealtimeHandlers({
+    focusedWorkspaceId,
+    handleTokenRefreshEvent,
+    managedWorkspaceId,
+    refreshGlobalUnauthorizedFindings,
+    refreshWorkspaceDetailsRef,
+    loadWorkspacesRef,
+    scheduleWorkspaceDetailRefresh,
+    scheduleWorkspaceListRefresh,
+    setWorkspaces,
+    showToastRef,
+    updateWsState,
+    wsStatesRef,
+  });
 
-    invalidateApiCache();
-    await loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
-
-    const focusedOrgId = managedWorkspaceId ?? focusedWorkspaceId;
-    if (!focusedOrgId) {
-      return;
-    }
-
-    const state = wsStatesRef.current[focusedOrgId] ?? DEFAULT_WS_STATE;
-    if (state.loadedMembers) {
-      await refreshWorkspaceDetailsRef.current?.(focusedOrgId);
-    }
-  }, [focusedWorkspaceId, managedWorkspaceId]);
-
-  const handleWorkspaceEvent = useCallback((event: WorkspaceEvent) => {
-    if (seenEventSequencesRef.current.has(event.sequence)) {
-      return;
-    }
-    seenEventSequencesRef.current.add(event.sequence);
-    if (seenEventSequencesRef.current.size > 100) {
-      const recentSequences = Array.from(seenEventSequencesRef.current).slice(-50);
-      seenEventSequencesRef.current = new Set(recentSequences);
-    }
-
-    if (event.type === "heartbeat") {
-      return;
-    }
-
-    if (!event.org_id) {
-      return;
-    }
-
-    if (event.type === "workspace_scheduled") {
-      setWorkspaces((prev) =>
-        prev.map((workspace) =>
-          workspace.org_id === event.org_id
-            ? {
-                ...workspace,
-                sync_reason: event.reason ?? workspace.sync_reason,
-                next_sync_at:
-                  event.next_sync_at !== undefined ? event.next_sync_at : workspace.next_sync_at,
-                hot_until: event.hot_until !== undefined ? event.hot_until : workspace.hot_until,
-                is_hot: event.is_hot ?? workspace.is_hot,
-                sync_priority: event.priority ?? workspace.sync_priority,
-              }
-            : workspace
-        )
-      );
-      return;
-    }
-
-    if (event.type === "sync_started") {
-      updateWsState(event.org_id, { syncing: true });
-      scheduleWorkspaceListRefresh();
-      return;
-    }
-
-    if (event.type === "workspace_updated") {
-      updateWsState(event.org_id, { syncing: false });
-      scheduleWorkspaceListRefresh();
-      scheduleWorkspaceDetailRefresh(event.org_id);
-      setWorkspaces((prev) =>
-        prev.map((workspace) =>
-          workspace.org_id === event.org_id
-            ? {
-                ...workspace,
-                sync_reason: event.reason ?? workspace.sync_reason,
-                next_sync_at:
-                  event.next_sync_at !== undefined ? event.next_sync_at : workspace.next_sync_at,
-                hot_until: event.hot_until !== undefined ? event.hot_until : workspace.hot_until,
-                is_hot: event.is_hot ?? workspace.is_hot,
-                pending_invites:
-                  event.summary?.pending_invites ?? workspace.pending_invites,
-                member_count: event.summary?.member_count ?? workspace.member_count,
-                unauthorized_active_count:
-                  event.summary?.unauthorized_active_count ?? workspace.unauthorized_active_count,
-                last_sync: event.summary?.last_sync ?? workspace.last_sync,
-                status: event.summary?.status ?? workspace.status,
-              }
-            : workspace
-        )
-      );
-
-      // Auto-refresh global unauthorized findings banner
-      void (async () => {
-        try {
-          const findings = await listAllUnauthorizedFindings({ forceFresh: true });
-          setGlobalUnauthorizedFindings(
-            findings.filter((finding) => finding.status === "detected" || finding.status === "kick_failed")
-          );
-          setUnauthorizedBannerDismissed(false);
-        } catch {
-          // silent
-        }
-      })();
-
-      if (event.trigger !== "auto") {
-        showToastRef.current?.(
-          "Realtime sync hoàn tất",
-          `Workspace ${event.org_id} đã được cập nhật tự động.`,
-          "success",
-          `workspace-updated-${event.org_id}-${event.trigger ?? "manual"}`
-        );
-      }
-      return;
-    }
-
-    if (handleTokenRefreshEvent(event)) {
-      return;
-    }
-
-    if (event.type === "sync_failed") {
-      updateWsState(event.org_id, { syncing: false });
-      scheduleWorkspaceListRefresh();
-      showToastRef.current?.(
-        "Realtime sync lỗi",
-        event.error?.message
-          ? `Workspace ${event.org_id}: ${event.error.message}`
-          : `Workspace ${event.org_id} đồng bộ thất bại.`,
-        "error",
-        `sync-failed-${event.org_id}`
-      );
-    }
-  }, [handleTokenRefreshEvent, scheduleWorkspaceDetailRefresh, scheduleWorkspaceListRefresh, updateWsState]);
-
-  const connectWorkspaceEvents = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-
-    const eventSource = new EventSource(buildWorkspaceEventsUrl());
-    eventSourceRef.current = eventSource;
-
-    const onMessage = (message: MessageEvent<string>) => {
-      try {
-        const payload = parseWorkspaceEvent(message.data);
-        reconnectAttemptsRef.current = 0;
-        handleWorkspaceEvent(payload);
-      } catch (error) {
-        if (process.env.NODE_ENV !== "production") {
-          console.warn("Ignoring malformed workspace event", error, message.data);
-        }
-      }
-    };
-
-    const onError = () => {
-      eventSource.close();
-      eventSourceRef.current = null;
-
-      if (reconnectTimerRef.current) {
-        window.clearTimeout(reconnectTimerRef.current);
-      }
-
-      const attempt = Math.min(reconnectAttemptsRef.current + 1, 5);
-      reconnectAttemptsRef.current = attempt;
-      const delay = Math.min(1000 * 2 ** (attempt - 1), 15000);
-
-      reconnectTimerRef.current = window.setTimeout(() => {
-        connectWorkspaceEvents();
-        invalidateApiCache();
-        void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
-      }, delay);
-    };
-
-    eventSource.onmessage = onMessage;
-    eventSource.addEventListener("heartbeat", onMessage as EventListener);
-    eventSource.addEventListener("workspace_scheduled", onMessage as EventListener);
-    eventSource.addEventListener("sync_started", onMessage as EventListener);
-    eventSource.addEventListener("workspace_updated", onMessage as EventListener);
-    eventSource.addEventListener("workspace_token_refreshed", onMessage as EventListener);
-    eventSource.addEventListener("workspace_token_refresh_failed", onMessage as EventListener);
-    eventSource.addEventListener("sync_failed", onMessage as EventListener);
-    eventSource.onerror = onError;
-  }, [handleTokenRefreshEvent, handleWorkspaceEvent]);
+  useWorkspaceEvents({
+    onEvent: handleWorkspaceEvent,
+    onReconnect: handleWorkspaceEventsReconnect,
+  });
 
   useEffect(() => {
     void loadWorkspaces();
-    // Fetch global unauthorized findings for the banner
-    void (async () => {
-      try {
-        const findings = await listAllUnauthorizedFindings({ forceFresh: true });
-        setGlobalUnauthorizedFindings(
-          findings.filter((finding) => finding.status === "detected" || finding.status === "kick_failed")
-        );
-        setUnauthorizedBannerDismissed(false);
-      } catch {
-        // silent — banner is optional
-      }
-    })();
-  }, [loadWorkspaces]);
+    void refreshGlobalUnauthorizedFindings();
+  }, [loadWorkspaces, refreshGlobalUnauthorizedFindings]);
 
   useEffect(() => {
-    connectWorkspaceEvents();
-
     return () => {
-      if (reconnectTimerRef.current) {
-        window.clearTimeout(reconnectTimerRef.current);
-      }
       if (workspaceRefreshTimerRef.current) {
         window.clearTimeout(workspaceRefreshTimerRef.current);
       }
@@ -618,11 +374,8 @@ export default function DashboardPage() {
       }
       detailRefreshTimersRef.current.clear();
       clearTokenRefreshPolling();
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
     };
-  }, [clearTokenRefreshPolling, connectWorkspaceEvents]);
+  }, [clearTokenRefreshPolling]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -684,344 +437,6 @@ export default function DashboardPage() {
     );
   }, [workspaces]);
 
-  async function loadMembers(orgId: string) {
-    const existingRequest = inflightMemberLoads.current.get(orgId);
-    if (existingRequest) {
-      return existingRequest;
-    }
-
-    const request = (async () => {
-      updateWsState(orgId, { syncing: true });
-      const [membersResult, invitesResult] = await Promise.allSettled([
-        getWorkspaceMembers(orgId, { forceFresh: true }),
-        listInvites(orgId, { forceFresh: true }),
-      ]);
-
-      const nextPatch: Partial<WorkspaceState> = {
-        syncing: false,
-      };
-
-      if (membersResult.status === "fulfilled") {
-        nextPatch.members = membersResult.value;
-        nextPatch.loadedMembers = true;
-      }
-
-      if (invitesResult.status === "fulfilled") {
-        nextPatch.invites = mergeInviteLists(
-          wsStatesRef.current[orgId]?.invites ?? [],
-          invitesResult.value,
-        );
-      }
-
-      updateWsState(orgId, nextPatch);
-
-      if (membersResult.status === "rejected") {
-        showToast(
-          "Không thể tải danh sách thành viên",
-          `Workspace ${orgId}: ${getActionErrorCopy("sync", membersResult.reason)}`,
-          "error"
-        );
-      }
-
-      if (invitesResult.status === "rejected") {
-        showToast(
-          "Không thể tải danh sách invite",
-          `Workspace ${orgId}: ${getActionErrorCopy("sync", invitesResult.reason)}`,
-          "error"
-        );
-      }
-
-      inflightMemberLoads.current.delete(orgId);
-    })().finally(() => {
-      updateWsState(orgId, { syncing: false });
-      inflightMemberLoads.current.delete(orgId);
-    });
-
-    inflightMemberLoads.current.set(orgId, request);
-    return request;
-  }
-
-  async function handleSync(orgId: string) {
-    updateWsState(orgId, { syncing: true });
-    try {
-      const result = await syncWorkspace(orgId);
-      applyWorkspaceSummary(result.updated_summary);
-
-      if (result.already_in_progress) {
-        void triggerPostActionRefresh(orgId, {
-          includeDetails: result.refresh_hint?.include_details ?? true,
-        });
-        return;
-      }
-
-      const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
-
-      if (state.loadedMembers) {
-        void triggerPostActionRefresh(orgId, {
-          includeDetails: result.refresh_hint?.include_details ?? true,
-        });
-      } else {
-        await loadMembers(orgId);
-      }
-    } catch (error) {
-      showToast(
-        "Sync thất bại",
-        getActionErrorCopy("sync", error),
-        "error"
-      );
-      updateWsState(orgId, { syncing: false });
-    }
-  }
-
-  async function handleKick(orgId: string, memberId: number) {
-    updateWsState(orgId, (current) => ({
-      busyMemberIds: [...current.busyMemberIds, memberId],
-    }));
-
-    try {
-      const result = await kickMember({ org_id: orgId, member_id: memberId });
-      const removedMemberId = result.member_id ?? memberId;
-      updateWsState(orgId, (current) => ({
-        members: removeMember(current.members, removedMemberId),
-      }));
-      applyWorkspaceSummary(result.updated_summary);
-      void triggerPostActionRefresh(orgId, {
-        includeDetails: result.refresh_hint?.include_details ?? true,
-      });
-    } catch (error) {
-      showToast(
-        "Không thể xóa thành viên",
-        getActionErrorCopy("kick", error),
-        "error"
-      );
-    } finally {
-      updateWsState(orgId, (current) => ({
-        busyMemberIds: current.busyMemberIds.filter((id) => id !== memberId),
-      }));
-    }
-  }
-
-  async function handleResendInvite(orgId: string, inviteId: string, inviteEmail?: string) {
-    updateWsState(orgId, (current) => ({
-      inviteActionState: {
-        ...current.inviteActionState,
-        [inviteId]: "resend",
-      },
-    }));
-
-    try {
-      const result = await resendInvite({ org_id: orgId, invite_id: inviteId, email: inviteEmail });
-      if (result.updated_record) {
-        const updatedInvite = result.updated_record;
-        updateWsState(orgId, (current) => ({
-          invites: replaceInvite(current.invites, inviteId, updatedInvite),
-        }));
-      }
-      applyWorkspaceSummary(result.updated_summary);
-      void triggerPostActionRefresh(orgId, {
-        includeDetails: result.refresh_hint?.include_details ?? true,
-      });
-    } catch (error) {
-      showToast(
-        "Gửi lại thất bại",
-        getActionErrorCopy("resend", error),
-        "error"
-      );
-    } finally {
-      updateWsState(orgId, (current) => {
-        const next = { ...current.inviteActionState };
-        delete next[inviteId];
-        return { inviteActionState: next };
-      });
-    }
-  }
-
-  async function handleRevokeInvite(orgId: string, inviteId: string) {
-    const previousInvites = wsStatesRef.current[orgId]?.invites ?? [];
-
-    updateWsState(orgId, (current) => ({
-      invites: removeInvite(current.invites, inviteId),
-      inviteActionState: {
-        ...current.inviteActionState,
-        [inviteId]: "revoke",
-      },
-    }));
-
-    try {
-      const result = await cancelInvite({ org_id: orgId, invite_id: inviteId });
-      applyWorkspaceSummary(result.updated_summary);
-      void triggerPostActionRefresh(orgId, {
-        includeDetails: result.refresh_hint?.include_details ?? true,
-      });
-    } catch (error) {
-      updateWsState(orgId, {
-        invites: previousInvites,
-      });
-      showToast(
-        "Thu hồi thất bại",
-        getActionErrorCopy("revoke", error),
-        "error"
-      );
-    } finally {
-      updateWsState(orgId, (current) => {
-        const next = { ...current.inviteActionState };
-        delete next[inviteId];
-        return { inviteActionState: next };
-      });
-    }
-  }
-
-  async function handleConfirmDelete() {
-    if (!deletingWs) return;
-    setDeleting(true);
-    try {
-      const result = await deleteWorkspace(deletingWs.org_id);
-      setWorkspaces((prev) =>
-        prev.filter((workspace) => workspace.org_id !== (result.deleted_org_id ?? deletingWs.org_id))
-      );
-      setWsStates((prev) => {
-        const next = { ...prev };
-        delete next[deletingWs.org_id];
-        return next;
-      });
-      if (focusedWorkspaceId === deletingWs.org_id) {
-        setFocusedWorkspaceId(null);
-      }
-      void triggerPostActionRefresh(undefined, {
-        includeDetails: result.refresh_hint?.include_details ?? false,
-      });
-      setDeletingWs(null);
-    } catch (error) {
-      showToast(
-        "Không thể xóa workspace",
-        getActionErrorCopy("delete_workspace", error),
-        "error"
-      );
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  async function handleRenameWorkspace(nextName: string) {
-    if (!renamingWorkspace) {
-      return;
-    }
-
-    setRenameSubmitting(true);
-    setRenameError(null);
-
-    try {
-      const result = await renameWorkspace(renamingWorkspace.org_id, nextName);
-      applyWorkspaceSummary(result.updated_summary);
-      if (result.updated_summary) {
-        mergeWorkspaceRecord(result.updated_summary);
-      }
-      invalidateApiCache();
-      void triggerPostActionRefreshRef.current?.(renamingWorkspace.org_id, {
-        immediate: true,
-        includeDetails: result.refresh_hint?.include_details ?? false,
-      });
-      setRenamingWorkspace(null);
-    } catch (error) {
-      const message = getActionErrorCopy("rename_workspace", error);
-      setRenameError(message);
-      showToast("Không thể đổi tên workspace", message, "error");
-    } finally {
-      setRenameSubmitting(false);
-    }
-  }
-
-  async function handleUpdateWorkspaceToken(accessToken: string) {
-    if (!tokenWorkspace) {
-      return;
-    }
-
-    setTokenSubmitting(true);
-    setTokenError(null);
-
-    try {
-      const result = await updateWorkspaceToken(tokenWorkspace.org_id, accessToken);
-      applyWorkspaceSummary(result.updated_summary);
-      if (result.updated_summary) {
-        mergeWorkspaceRecord(result.updated_summary);
-      }
-      invalidateApiCache();
-      void triggerPostActionRefreshRef.current?.(tokenWorkspace.org_id, {
-        immediate: true,
-        includeDetails: result.refresh_hint?.include_details ?? false,
-      });
-      setTokenWorkspace(null);
-      showToast("Đã lưu token thủ công", "Token mới đã được cập nhật cho workspace.", "success");
-    } catch (error) {
-      const message = getActionErrorCopy("sync", error);
-      setTokenError(message);
-      showToast("Không thể cập nhật token", message, "error");
-    } finally {
-      setTokenSubmitting(false);
-    }
-  }
-
-  async function handleRefreshWorkspaceToken(workspace: Workspace) {
-    setTokenSubmitting(true);
-    setTokenError(null);
-
-    try {
-      const result = await refreshWorkspaceToken(workspace.org_id);
-      applyWorkspaceSummary(result.updated_summary);
-      if (result.updated_summary) {
-        mergeWorkspaceRecord(result.updated_summary);
-      }
-      invalidateApiCache();
-      void triggerPostActionRefreshRef.current?.(workspace.org_id, {
-        immediate: true,
-        includeDetails: result.refresh_hint?.include_details ?? true,
-      });
-
-      if (result.status === "success") {
-        stopTokenRefreshPolling(workspace.org_id);
-        showToast("Refresh token thành công", result.message, "success");
-        return;
-      }
-
-      if (result.status === "partial_success") {
-        stopTokenRefreshPolling(workspace.org_id);
-        showToast("Refresh token thành công một phần", result.message, "info");
-        return;
-      }
-
-      if (result.status === "accepted") {
-        startTokenRefreshPolling(result.updated_summary ?? workspace);
-        showToast(
-          "Đang refresh token",
-          `Đã gửi yêu cầu refresh cho workspace ${workspace.org_id}. Dashboard sẽ báo tiếp khi hoàn tất.`,
-          "info",
-          `workspace-token-refresh-started-${workspace.org_id}`
-        );
-        return;
-      }
-
-      if (result.status === "in_progress") {
-        startTokenRefreshPolling(result.updated_summary ?? workspace);
-        showToast(
-          "Workspace đang được xử lý",
-          `Workspace ${workspace.org_id} đang refresh token. Dashboard sẽ báo khi xong.`,
-          "info",
-          `workspace-token-refresh-progress-${workspace.org_id}`
-        );
-        return;
-      }
-
-      showToast("Refresh token", result.message, "info");
-    } catch (error) {
-      const message = getErrorMessage(error);
-      setTokenError(message);
-      setTokenWorkspace(workspace);
-      showToast("Không thể refresh token", message, "error");
-    } finally {
-      setTokenSubmitting(false);
-    }
-  }
-
   function handleOpenRename(workspace: Workspace) {
     setRenameError(null);
     setRenamingWorkspace(workspace);
@@ -1064,7 +479,6 @@ export default function DashboardPage() {
     ? wsStates[managedWorkspace.org_id] ?? DEFAULT_WS_STATE
     : DEFAULT_WS_STATE;
 
-
   return (
     <main className={`dashboard-layout${viewMode === "compact" ? " dashboard-layout-compact" : ""}`}>
       <div className="dashboard-header">
@@ -1097,72 +511,10 @@ export default function DashboardPage() {
       />
 
       {globalUnauthorizedFindings.length > 0 && !unauthorizedBannerDismissed && (
-        <div className="section-panel" style={{
-          marginBottom: 24,
-          border: "1px solid rgba(245,196,81,0.25)",
-          background: "rgba(245,196,81,0.06)",
-          borderRadius: 16,
-          padding: "18px 22px",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-            <div>
-              <h3 className="section-heading" style={{ color: "#f5c451", marginBottom: 8 }}>
-                ⚠️ Unauthorized Member Alert — {globalUnauthorizedFindings.length} active case{globalUnauthorizedFindings.length > 1 ? "s" : ""}
-              </h3>
-              <p className="section-description" style={{ marginBottom: 12 }}>
-                Các thành viên dưới đây đang là case chưa xử lý dứt điểm trong local whitelist. Nếu auto-kick thành công thì case sẽ tự biến mất khỏi banner này.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-compact"
-              onClick={() => setUnauthorizedBannerDismissed(true)}
-              style={{ flexShrink: 0 }}
-            >
-              Dismiss
-            </button>
-          </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {globalUnauthorizedFindings.map((finding) => (
-              <div
-                key={finding.id}
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  padding: "8px 12px",
-                  background: "rgba(255,255,255,0.03)",
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  fontSize: 13,
-                }}
-              >
-                <span style={{
-                  display: "inline-block",
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: finding.status === "kicked" ? "#4ade80" : finding.status === "kick_failed" ? "#ff6b6b" : "#f5c451",
-                  flexShrink: 0,
-                }} />
-                <strong style={{ minWidth: 160 }}>{finding.email}</strong>
-                <span className="workspace-helper-copy">→ team <strong>{finding.workspace_name}</strong></span>
-                <span className="workspace-helper-copy">
-                  Detected: {new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(finding.first_seen_at))}
-                </span>
-                {finding.resolved_at && (
-                  <span className="workspace-helper-copy">
-                    Kicked: {new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(finding.resolved_at))}
-                  </span>
-                )}
-                <span className={`workspace-badge badge-${finding.status === "kicked" ? "synced" : finding.status === "kick_failed" ? "error" : "warning"}`} style={{ marginLeft: "auto" }}>
-                  {finding.status === "kicked" ? "Kicked" : finding.status === "kick_failed" ? "Kick failed" : finding.status === "trusted" ? "Trusted" : "Detected"}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <GlobalUnauthorizedAlert
+          findings={globalUnauthorizedFindings}
+          onDismiss={dismissGlobalUnauthorizedFindings}
+        />
       )}
 
       {loading && (
@@ -1496,28 +848,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="toast-stack" aria-live="polite" aria-atomic="true">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast-item toast-${toast.tone}`} role="status">
-            <div className="toast-accent" aria-hidden="true">
-              {toast.tone === "success" ? "✓" : toast.tone === "error" ? "!" : "i"}
-            </div>
-            <div className="toast-copy">
-              <strong className="toast-title">{toast.title}</strong>
-              <span className="toast-message">{toast.message}</span>
-            </div>
-            <button
-              className="toast-close"
-              onClick={() =>
-                setToasts((prev) => prev.filter((item) => item.id !== toast.id))
-              }
-            >
-              ✕
-            </button>
-            <span className="toast-progress" aria-hidden="true" />
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }
