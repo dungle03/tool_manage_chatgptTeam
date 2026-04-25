@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import case, select
@@ -72,10 +73,17 @@ async def get_workspaces(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
+    started_at = perf_counter()
     rows = list(
         session.execute(select(Workspace).order_by(Workspace.org_id)).scalars().all()
     )
-    return build_workspace_list_payload(rows, session)
+    payload = build_workspace_list_payload(rows, session)
+    logger.info(
+        "workspace_list duration_ms=%.1f workspaces=%d",
+        (perf_counter() - started_at) * 1000,
+        len(payload),
+    )
+    return payload
 
 
 @router.post("/api/teams/import")
@@ -282,6 +290,7 @@ def get_workspace_details(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
+    started_at = perf_counter()
     workspace = session.execute(
         select(Workspace).where(Workspace.org_id == id)
     ).scalar_one_or_none()
@@ -324,7 +333,7 @@ def get_workspace_details(
         .all()
     )
 
-    return {
+    payload = {
         "members": [serialize_member_row(member) for member in members],
         "invites": [serialize_invite_row(invite) for invite in invites],
         "unauthorized_findings": [
@@ -332,6 +341,15 @@ def get_workspace_details(
             for finding in unauthorized_findings
         ],
     }
+    logger.info(
+        "workspace_details org_id=%s duration_ms=%.1f members=%d invites=%d unauthorized_findings=%d",
+        id,
+        (perf_counter() - started_at) * 1000,
+        len(members),
+        len(invites),
+        len(unauthorized_findings),
+    )
+    return payload
 
 
 @router.get("/api/workspaces/{id}/unauthorized-members")

@@ -1,4 +1,6 @@
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 
 from jwt import PyJWTError
@@ -14,14 +16,95 @@ from app.services.workspace_unauthorized import (
 )
 
 
-def get_access_token_expiry(workspace: Workspace) -> datetime | None:
-    if not workspace.access_token:
-        return None
+TOKEN_METADATA_CACHE_TTL_SECONDS = 60
+TOKEN_METADATA_CACHE_MAX_SIZE = 256
+
+
+@dataclass(frozen=True)
+class TokenMetadata:
+    expires_at: datetime | None
+    user_id: str | None
+    email: str | None
+
+
+_token_metadata_cache: dict[str, tuple[float, TokenMetadata]] = {}
+
+
+def _cache_key_for_token(access_token: str) -> str:
+    return access_token
+
+
+def _prune_token_metadata_cache(now: float) -> None:
+    expired_keys = [
+        key
+        for key, (expires_at, _metadata) in _token_metadata_cache.items()
+        if expires_at <= now
+    ]
+    for key in expired_keys:
+        _token_metadata_cache.pop(key, None)
+
+    if len(_token_metadata_cache) <= TOKEN_METADATA_CACHE_MAX_SIZE:
+        return
+
+    oldest_keys = sorted(
+        _token_metadata_cache,
+        key=lambda key: _token_metadata_cache[key][0],
+    )
+    for key in oldest_keys[
+        : len(_token_metadata_cache) - TOKEN_METADATA_CACHE_MAX_SIZE
+    ]:
+        _token_metadata_cache.pop(key, None)
+
+
+def get_access_token_metadata(access_token: str | None) -> TokenMetadata:
+    if not access_token:
+        return TokenMetadata(expires_at=None, user_id=None, email=None)
+
+    now = monotonic()
+    cache_key = _cache_key_for_token(access_token)
+    cached = _token_metadata_cache.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1]
 
     try:
-        return chatgpt_service.extract_access_token_expiry(workspace.access_token)
+        claims = chatgpt_service.decode_access_token_claims(access_token)
     except (PyJWTError, ValueError, TypeError):
-        return None
+        metadata = TokenMetadata(expires_at=None, user_id=None, email=None)
+    else:
+        exp = claims.get("exp")
+        expires_at = None
+        if exp is not None:
+            try:
+                expires_at = datetime.fromtimestamp(int(exp), tz=timezone.utc)
+            except (TypeError, ValueError, OSError):
+                expires_at = None
+
+        auth_claims = claims.get("https://api.openai.com/auth") or {}
+        metadata = TokenMetadata(
+            expires_at=expires_at,
+            user_id=normalize_identity(
+                auth_claims.get("chatgpt_user_id")
+                or auth_claims.get("user_id")
+                or claims.get("user_id")
+                or claims.get("sub")
+            ),
+            email=normalize_identity(
+                claims.get("email")
+                or claims.get("https://auth.openai.com/email")
+                or auth_claims.get("email")
+            ),
+        )
+
+    _token_metadata_cache[cache_key] = (
+        now + TOKEN_METADATA_CACHE_TTL_SECONDS,
+        metadata,
+    )
+    _prune_token_metadata_cache(now)
+    return metadata
+
+
+def get_access_token_expiry(workspace: Workspace) -> datetime | None:
+    return get_access_token_metadata(workspace.access_token).expires_at
 
 
 def normalize_identity(value: str | None) -> str | None:
@@ -35,22 +118,9 @@ def get_current_user_role(workspace: Workspace, session: Session) -> str:
     if not workspace.access_token:
         return "user"
 
-    token_user_id = None
-    token_email = None
-
-    try:
-        token_user_id = normalize_identity(
-            chatgpt_service.extract_user_id(workspace.access_token)
-        )
-    except (PyJWTError, ValueError, TypeError):
-        token_user_id = None
-
-    try:
-        token_email = normalize_identity(
-            chatgpt_service.extract_email(workspace.access_token)
-        )
-    except (PyJWTError, ValueError, TypeError):
-        token_email = None
+    metadata = get_access_token_metadata(workspace.access_token)
+    token_user_id = metadata.user_id
+    token_email = metadata.email
 
     members = (
         session.execute(select(Member).where(Member.org_id == workspace.org_id))
@@ -118,22 +188,9 @@ def build_current_user_role_map(
     candidate_emails: set[str] = set()
 
     for workspace in workspaces:
-        token_user_id = None
-        token_email = None
-        if workspace.access_token:
-            try:
-                token_user_id = normalize_identity(
-                    chatgpt_service.extract_user_id(workspace.access_token)
-                )
-            except (PyJWTError, ValueError, TypeError):
-                token_user_id = None
-
-            try:
-                token_email = normalize_identity(
-                    chatgpt_service.extract_email(workspace.access_token)
-                )
-            except (PyJWTError, ValueError, TypeError):
-                token_email = None
+        metadata = get_access_token_metadata(workspace.access_token)
+        token_user_id = metadata.user_id
+        token_email = metadata.email
 
         token_identity_by_org[workspace.org_id] = (token_user_id, token_email)
         if token_user_id:

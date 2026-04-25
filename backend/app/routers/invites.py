@@ -1,4 +1,6 @@
+import logging
 from datetime import datetime, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select
@@ -19,6 +21,7 @@ from app.services.workspace_sync import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _refresh_remote_invites_for_workspace(
@@ -93,6 +96,7 @@ async def get_invites(
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
+    started_at = perf_counter()
     workspace = session.execute(
         select(Workspace).where(Workspace.org_id == org_id)
     ).scalar_one_or_none()
@@ -118,7 +122,15 @@ async def get_invites(
                 .all()
             )
 
-    return [serialize_invite_row(row) for row in rows]
+    payload = [serialize_invite_row(row) for row in rows]
+    logger.info(
+        "invite_list org_id=%s refresh_remote=%s duration_ms=%.1f invites=%d",
+        org_id,
+        refresh_remote,
+        (perf_counter() - started_at) * 1000,
+        len(payload),
+    )
+    return payload
 
 
 @router.post("/api/invite")
