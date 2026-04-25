@@ -1,4 +1,4 @@
-import { inviteMember, kickMember, listInvites, resendInvite, cancelInvite, syncWorkspace } from "@/lib/api";
+import { cancelInvite, getWorkspaceDetails, inviteMember, kickMember, listInvites, resendInvite, syncWorkspace } from "@/lib/api";
 import { describe, it, expect, vi } from "vitest";
 
 describe("endpoint wiring", () => {
@@ -9,6 +9,7 @@ describe("endpoint wiring", () => {
     await inviteMember({ org_id: "org_001", email: "a@x.com" });
     await kickMember({ org_id: "org_001", member_id: 1 });
     await listInvites("org_001");
+    await getWorkspaceDetails("org_001");
     await resendInvite({ org_id: "org_001", invite_id: "inv_1", email: "a@x.com" });
     await cancelInvite({ org_id: "org_001", invite_id: "inv_1" });
     await syncWorkspace("org_001");
@@ -17,6 +18,7 @@ describe("endpoint wiring", () => {
     expect(calledUrls).toContain("/api/invite");
     expect(calledUrls).toContain("/api/member");
     expect(calledUrls).toContain("/api/invites?org_id=org_001");
+    expect(calledUrls).toContain("/api/workspaces/org_001/details");
     expect(calledUrls).toContain("/api/resend-invite");
     expect(calledUrls).toContain("/api/cancel-invite");
     expect(calledUrls).toContain("/api/workspaces/org_001/sync");

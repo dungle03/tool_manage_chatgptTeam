@@ -89,17 +89,19 @@ function formatRemainingTime(timestamp?: string | null): string | null {
   return "soon";
 }
 
+const COMPACT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
 function formatDisplayDate(timestamp?: string | null): string | null {
   if (!timestamp) return null;
 
   const target = new Date(timestamp);
   if (Number.isNaN(target.getTime())) return null;
 
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(target);
+  return COMPACT_DATE_FORMATTER.format(target);
 }
 
 function getTokenStatusCopy(

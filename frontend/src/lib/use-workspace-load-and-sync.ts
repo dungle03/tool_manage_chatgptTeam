@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { getWorkspaceMembers, listInvites, syncWorkspace } from "@/lib/api";
+import { getWorkspaceDetails, syncWorkspace } from "@/lib/api";
 import { getActionErrorCopy } from "@/lib/dashboard-formatters";
 import { mergeInviteLists } from "@/lib/workspace-state";
 import { DEFAULT_WS_STATE, type UpdateWorkspaceState, type WorkspaceState } from "@/lib/workspace-dashboard-state";
@@ -37,41 +37,23 @@ export function useWorkspaceLoadAndSync({
 
     const request = (async () => {
       updateWsState(orgId, { syncing: true });
-      const [membersResult, invitesResult] = await Promise.allSettled([
-        getWorkspaceMembers(orgId, { forceFresh: true }),
-        listInvites(orgId, { forceFresh: true }),
-      ]);
 
-      const nextPatch: Partial<WorkspaceState> = {
-        syncing: false,
-      };
-
-      if (membersResult.status === "fulfilled") {
-        nextPatch.members = membersResult.value;
-        nextPatch.loadedMembers = true;
-      }
-
-      if (invitesResult.status === "fulfilled") {
-        nextPatch.invites = mergeInviteLists(
-          wsStatesRef.current[orgId]?.invites ?? [],
-          invitesResult.value,
-        );
-      }
-
-      updateWsState(orgId, nextPatch);
-
-      if (membersResult.status === "rejected") {
+      try {
+        const details = await getWorkspaceDetails(orgId, { forceFresh: true });
+        updateWsState(orgId, {
+          syncing: false,
+          members: details.members,
+          loadedMembers: true,
+          invites: mergeInviteLists(
+            wsStatesRef.current[orgId]?.invites ?? [],
+            details.invites,
+          ),
+        });
+      } catch (error) {
+        updateWsState(orgId, { syncing: false });
         showToast(
-          "Không thể tải danh sách thành viên",
-          `Workspace ${orgId}: ${getActionErrorCopy("sync", membersResult.reason)}`,
-          "error"
-        );
-      }
-
-      if (invitesResult.status === "rejected") {
-        showToast(
-          "Không thể tải danh sách invite",
-          `Workspace ${orgId}: ${getActionErrorCopy("sync", invitesResult.reason)}`,
+          "Không thể tải chi tiết workspace",
+          `Workspace ${orgId}: ${getActionErrorCopy("sync", error)}`,
           "error"
         );
       }

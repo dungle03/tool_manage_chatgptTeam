@@ -14,9 +14,8 @@ import { ToastStack } from "@/components/toast-stack";
 import { UpdateTokenDialog } from "@/components/update-token-dialog";
 import {
   getWorkspaces,
-  getWorkspaceMembers,
+  getWorkspaceDetails,
   invalidateApiCache,
-  listInvites,
 } from "@/lib/api";
 import {
   formatDashboardDateLabel,
@@ -145,45 +144,31 @@ export default function DashboardPage() {
     const requestVersion = (workspaceDetailRequestVersionRef.current.get(orgId) ?? 0) + 1;
     workspaceDetailRequestVersionRef.current.set(orgId, requestVersion);
 
-    const [membersResult, invitesResult] = await Promise.allSettled([
-      getWorkspaceMembers(orgId, { forceFresh: true }),
-      listInvites(orgId, { forceFresh: true }),
-    ]);
+    try {
+      const details = await getWorkspaceDetails(orgId, { forceFresh: true });
 
-    if (workspaceDetailRequestVersionRef.current.get(orgId) !== requestVersion) {
-      return;
-    }
+      if (workspaceDetailRequestVersionRef.current.get(orgId) !== requestVersion) {
+        return;
+      }
 
-    const nextPatch: Partial<WorkspaceState> = {
-      syncing: false,
-    };
+      updateWsState(orgId, {
+        members: details.members,
+        loadedMembers: true,
+        invites: mergeInviteLists(
+          wsStatesRef.current[orgId]?.invites ?? [],
+          details.invites,
+        ),
+        syncing: false,
+      });
+    } catch (error) {
+      if (workspaceDetailRequestVersionRef.current.get(orgId) !== requestVersion) {
+        return;
+      }
 
-    if (membersResult.status === "fulfilled") {
-      nextPatch.members = membersResult.value;
-      nextPatch.loadedMembers = true;
-    }
-
-    if (invitesResult.status === "fulfilled") {
-      nextPatch.invites = mergeInviteLists(
-        wsStatesRef.current[orgId]?.invites ?? [],
-        invitesResult.value,
-      );
-    }
-
-    updateWsState(orgId, nextPatch);
-
-    if (membersResult.status === "rejected") {
+      updateWsState(orgId, { syncing: false });
       showToast(
-        "Không thể làm mới danh sách thành viên",
-        `Workspace ${orgId}: ${getActionErrorCopy("sync", membersResult.reason)}`,
-        "error"
-      );
-    }
-
-    if (invitesResult.status === "rejected") {
-      showToast(
-        "Không thể làm mới danh sách invite",
-        `Workspace ${orgId}: ${getActionErrorCopy("sync", invitesResult.reason)}`,
+        "Không thể làm mới chi tiết workspace",
+        `Workspace ${orgId}: ${getActionErrorCopy("sync", error)}`,
         "error"
       );
     }
@@ -205,17 +190,25 @@ export default function DashboardPage() {
     showToastRef.current = showToast;
   }, [showToast]);
 
-  const scheduleWorkspaceListRefresh = useCallback((delayMs = EVENT_REFRESH_WINDOW_MS) => {
-    if (workspaceRefreshTimerRef.current) {
-      return;
-    }
+  const scheduleWorkspaceListRefresh = useCallback(
+    (delayMs = EVENT_REFRESH_WINDOW_MS, options?: { forceFresh?: boolean }) => {
+      if (workspaceRefreshTimerRef.current) {
+        return;
+      }
 
-    workspaceRefreshTimerRef.current = window.setTimeout(() => {
-      workspaceRefreshTimerRef.current = null;
-      invalidateApiCache();
-      void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
-    }, delayMs);
-  }, []);
+      workspaceRefreshTimerRef.current = window.setTimeout(() => {
+        workspaceRefreshTimerRef.current = null;
+        if (options?.forceFresh) {
+          invalidateApiCache();
+        }
+        void loadWorkspacesRef.current?.({
+          silent: true,
+          forceFresh: options?.forceFresh,
+        });
+      }, delayMs);
+    },
+    []
+  );
 
   const scheduleWorkspaceDetailRefresh = useCallback((orgId: string) => {
     const state = wsStatesRef.current[orgId] ?? DEFAULT_WS_STATE;
@@ -275,7 +268,7 @@ export default function DashboardPage() {
         return;
       }
 
-      scheduleWorkspaceListRefresh();
+      scheduleWorkspaceListRefresh(undefined, { forceFresh: true });
       if (orgId && includeDetails) {
         scheduleWorkspaceDetailRefresh(orgId);
       }
@@ -699,7 +692,7 @@ export default function DashboardPage() {
             }
 
             invalidateApiCache();
-            void loadWorkspacesRef.current?.({ silent: true });
+            void loadWorkspacesRef.current?.({ silent: true, forceFresh: true });
 
             if (targetOrgId) {
               void triggerPostActionRefreshRef.current?.(targetOrgId, {

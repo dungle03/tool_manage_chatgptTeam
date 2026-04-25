@@ -170,7 +170,9 @@ def test_list_invites_learns_new_remote_invites_without_dropping_local_pending_t
     finally:
         session.close()
 
-    response = client.get("/api/invites", params={"org_id": "org_001"})
+    response = client.get(
+        "/api/invites", params={"org_id": "org_001", "refresh_remote": True}
+    )
     assert response.status_code == 200
     invites = {item["email"]: item for item in response.json()}
     assert "tool-created@company.com" in invites
@@ -195,7 +197,9 @@ def test_list_invites_normalizes_numeric_pending_statuses_from_remote(
         "app.services.chatgpt.ChatGPTService.get_invites", fake_get_invites
     )
 
-    response = client.get("/api/invites", params={"org_id": "org_001"})
+    response = client.get(
+        "/api/invites", params={"org_id": "org_001", "refresh_remote": True}
+    )
     assert response.status_code == 200
     invites = {item["email"]: item for item in response.json()}
     assert invites["numeric-pending@company.com"]["status"] == "pending"

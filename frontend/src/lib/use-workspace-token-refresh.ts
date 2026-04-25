@@ -243,12 +243,13 @@ export function useWorkspaceTokenRefreshLifecycle({
     if (event.type === "workspace_token_refreshed") {
       stopTokenRefreshPolling(event.org_id);
       setWorkspaceSyncing(event.org_id, false);
-      invalidateApiCache();
-      void refreshWorkspaceList({ silent: true, forceFresh: true });
-      scheduleWorkspaceDetailRefresh(event.org_id);
       if (event.summary) {
         mergeWorkspaceRecord(event.summary as Workspace);
+      } else {
+        invalidateApiCache();
+        void refreshWorkspaceList({ silent: true, forceFresh: true });
       }
+      scheduleWorkspaceDetailRefresh(event.org_id);
       showToast(
         "Refresh token thành công",
         buildTokenRefreshSuccessMessage(event.org_id, event.summary),
@@ -261,12 +262,13 @@ export function useWorkspaceTokenRefreshLifecycle({
     if (event.type === "workspace_token_refresh_failed") {
       stopTokenRefreshPolling(event.org_id);
       setWorkspaceSyncing(event.org_id, false);
-      invalidateApiCache();
-      void refreshWorkspaceList({ silent: true, forceFresh: true });
-      scheduleWorkspaceDetailRefresh(event.org_id);
       if (event.summary) {
         mergeWorkspaceRecord(event.summary as Workspace);
+      } else {
+        invalidateApiCache();
+        void refreshWorkspaceList({ silent: true, forceFresh: true });
       }
+      scheduleWorkspaceDetailRefresh(event.org_id);
       showToast(
         "Refresh token thất bại",
         event.error?.message

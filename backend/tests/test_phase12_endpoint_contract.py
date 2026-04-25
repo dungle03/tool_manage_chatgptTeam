@@ -6,6 +6,7 @@ def test_phase12_required_paths_exist_in_openapi():
     assert "/api/teams/import" in paths
     assert "/api/workspaces/{id}/sync" in paths
     assert "/api/workspaces/{id}/members" in paths
+    assert "/api/workspaces/{id}/details" in paths
 
 
 def test_get_workspaces_exposes_phase2_fields(client, seed_data):
@@ -21,6 +22,30 @@ def test_get_workspaces_exposes_phase2_fields(client, seed_data):
     assert ws["member_count"] == 2
     assert ws["member_limit"] == 7
     assert "last_sync" in ws
+
+
+def test_workspace_details_endpoint_returns_combined_local_payload(client, seed_data):
+    response = client.get("/api/workspaces/org_001/details")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert set(body.keys()) == {"members", "invites", "unauthorized_findings"}
+    assert {member["email"] for member in body["members"]} == {
+        "member1@company.com",
+        "owner@company.com",
+    }
+    assert body["invites"] == [
+        {
+            "id": 1,
+            "org_id": "org_001",
+            "email": "pending@company.com",
+            "invite_id": "inv_seed_1",
+            "status": "pending",
+            "created_by_tool": True,
+            "created_at": body["invites"][0]["created_at"],
+        }
+    ]
+    assert body["unauthorized_findings"] == []
 
 
 def test_workspace_sync_endpoint_has_phase2_shape(client, seed_data):
@@ -41,7 +66,9 @@ def test_workspace_import_returns_richer_contract(client, monkeypatch):
             }
         ]
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info
+    )
 
     response = client.post(
         "/api/teams/import",
@@ -65,7 +92,9 @@ def test_workspace_import_returns_richer_contract(client, monkeypatch):
     assert body["schedule_warnings"] == []
 
 
-def test_workspace_import_returns_partial_success_when_followup_schedule_fails(client, monkeypatch):
+def test_workspace_import_returns_partial_success_when_followup_schedule_fails(
+    client, monkeypatch
+):
     async def fake_get_account_info(_self, _access_token):
         return [
             {
@@ -76,12 +105,24 @@ def test_workspace_import_returns_partial_success_when_followup_schedule_fails(c
             }
         ]
 
-    def fake_schedule_followup_sync(_session, workspace, *, reason, delay_seconds=None, hot_window_seconds=None, publish_event=True):
+    def fake_schedule_followup_sync(
+        _session,
+        workspace,
+        *,
+        reason,
+        delay_seconds=None,
+        hot_window_seconds=None,
+        publish_event=True
+    ):
         if workspace.org_id == "org_import_warn_1":
             raise RuntimeError("schedule phase failed")
 
-    monkeypatch.setattr("app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info)
-    monkeypatch.setattr("app.routers.workspaces.schedule_followup_sync", fake_schedule_followup_sync)
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info
+    )
+    monkeypatch.setattr(
+        "app.routers.workspaces.schedule_followup_sync", fake_schedule_followup_sync
+    )
 
     response = client.post(
         "/api/teams/import",

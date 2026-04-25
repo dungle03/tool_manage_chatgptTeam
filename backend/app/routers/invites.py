@@ -21,9 +21,75 @@ from app.services.workspace_sync import (
 router = APIRouter()
 
 
+async def _refresh_remote_invites_for_workspace(
+    session: Session,
+    *,
+    workspace: Workspace,
+    rows: list[Invite],
+) -> list[Invite]:
+    org_id = workspace.org_id
+    rows_by_id = {row.invite_id: row for row in rows if row.invite_id}
+    rows_by_email = {row.email.strip().lower(): row for row in rows if row.email}
+    seen_row_ids: set[int] = set()
+
+    access_token = await resolve_access_token(workspace)
+    account_id = workspace.account_id or workspace.org_id
+    remote_invites = await chatgpt_service.get_invites(access_token, account_id)
+
+    for index, item in enumerate(remote_invites, start=1):
+        invite_id = str(
+            item.get("id") or item.get("invite_id") or f"inv_{org_id}_{index}"
+        )
+        email = (
+            str(item.get("email") or item.get("email_address") or "").strip().lower()
+        )
+        if not email:
+            continue
+
+        existing = rows_by_id.get(invite_id)
+        if existing is None:
+            existing = rows_by_email.get(email)
+
+        if existing is None:
+            existing = Invite(
+                org_id=org_id,
+                email=email,
+                invite_id=invite_id,
+                status=normalize_invite_status(item.get("status") or "pending"),
+                created_by_tool=False,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(existing)
+            session.flush()
+            rows.append(existing)
+        else:
+            existing.email = email
+            existing.invite_id = invite_id
+            existing.status = normalize_invite_status(
+                item.get("status") or existing.status or "pending"
+            )
+
+        rows_by_id[invite_id] = existing
+        rows_by_email[email] = existing
+        seen_row_ids.add(existing.id)
+
+    for row in rows:
+        if row.id in seen_row_ids:
+            continue
+        if normalize_invite_status(row.status) == "pending":
+            continue
+        session.delete(row)
+
+    session.commit()
+    return list(
+        session.execute(select(Invite).where(Invite.org_id == org_id)).scalars().all()
+    )
+
+
 @router.get("/api/invites")
 async def get_invites(
     org_id: str,
+    refresh_remote: bool = False,
     session: Session = Depends(get_session),
     _token: str = Depends(verify_admin_token),
 ):
@@ -36,74 +102,21 @@ async def get_invites(
     rows = list(
         session.execute(select(Invite).where(Invite.org_id == org_id)).scalars().all()
     )
-    rows_by_id = {row.invite_id: row for row in rows if row.invite_id}
-    rows_by_email = {row.email.strip().lower(): row for row in rows if row.email}
-    seen_row_ids: set[int] = set()
 
-    try:
-        access_token = await resolve_access_token(workspace)
-        account_id = workspace.account_id or workspace.org_id
-        remote_invites = await chatgpt_service.get_invites(access_token, account_id)
-
-        for index, item in enumerate(remote_invites, start=1):
-            invite_id = str(
-                item.get("id") or item.get("invite_id") or f"inv_{org_id}_{index}"
+    if refresh_remote:
+        try:
+            rows = await _refresh_remote_invites_for_workspace(
+                session,
+                workspace=workspace,
+                rows=rows,
             )
-            email = (
-                str(item.get("email") or item.get("email_address") or "")
-                .strip()
-                .lower()
+        except Exception:
+            session.rollback()
+            rows = list(
+                session.execute(select(Invite).where(Invite.org_id == org_id))
+                .scalars()
+                .all()
             )
-            if not email:
-                continue
-
-            existing = rows_by_id.get(invite_id)
-            if existing is None:
-                existing = rows_by_email.get(email)
-
-            if existing is None:
-                existing = Invite(
-                    org_id=org_id,
-                    email=email,
-                    invite_id=invite_id,
-                    status=normalize_invite_status(item.get("status") or "pending"),
-                    created_by_tool=False,
-                    created_at=datetime.now(timezone.utc),
-                )
-                session.add(existing)
-                session.flush()
-                rows.append(existing)
-            else:
-                existing.email = email
-                existing.invite_id = invite_id
-                existing.status = normalize_invite_status(
-                    item.get("status") or existing.status or "pending"
-                )
-
-            rows_by_id[invite_id] = existing
-            rows_by_email[email] = existing
-            seen_row_ids.add(existing.id)
-
-        for row in rows:
-            if row.id in seen_row_ids:
-                continue
-            if normalize_invite_status(row.status) == "pending":
-                continue
-            session.delete(row)
-
-        session.commit()
-        rows = list(
-            session.execute(select(Invite).where(Invite.org_id == org_id))
-            .scalars()
-            .all()
-        )
-    except Exception:
-        session.rollback()
-        rows = list(
-            session.execute(select(Invite).where(Invite.org_id == org_id))
-            .scalars()
-            .all()
-        )
 
     return [serialize_invite_row(row) for row in rows]
 

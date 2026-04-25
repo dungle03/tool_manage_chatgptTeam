@@ -27,6 +27,8 @@ from app.services.workspace_sync import (
     resolve_access_token,
     schedule_followup_sync,
     serialize_datetime,
+    serialize_invite_row,
+    serialize_member_row,
     serialize_unauthorized_finding_row,
     sync_workspace_data,
     workspace_to_dict,
@@ -272,6 +274,64 @@ def get_all_unauthorized_findings(
         serialized["workspace_name"] = workspace_names.get(row.org_id, row.org_id)
         results.append(serialized)
     return results
+
+
+@router.get("/api/workspaces/{id}/details")
+def get_workspace_details(
+    id: str,
+    session: Session = Depends(get_session),
+    _token: str = Depends(verify_admin_token),
+):
+    workspace = session.execute(
+        select(Workspace).where(Workspace.org_id == id)
+    ).scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    members = (
+        session.execute(
+            select(Member)
+            .where(Member.org_id == id)
+            .order_by(Member.role.desc(), Member.email.asc(), Member.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    invites = (
+        session.execute(
+            select(Invite)
+            .where(Invite.org_id == id)
+            .order_by(Invite.created_at.desc(), Invite.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+    unauthorized_findings = (
+        session.execute(
+            select(UnauthorizedFinding)
+            .where(UnauthorizedFinding.org_id == id)
+            .order_by(
+                case(
+                    (UnauthorizedFinding.status == "detected", 0),
+                    (UnauthorizedFinding.status == "kick_failed", 1),
+                    else_=2,
+                ),
+                UnauthorizedFinding.last_seen_at.desc(),
+                UnauthorizedFinding.id.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "members": [serialize_member_row(member) for member in members],
+        "invites": [serialize_invite_row(invite) for invite in invites],
+        "unauthorized_findings": [
+            serialize_unauthorized_finding_row(finding)
+            for finding in unauthorized_findings
+        ],
+    }
 
 
 @router.get("/api/workspaces/{id}/unauthorized-members")

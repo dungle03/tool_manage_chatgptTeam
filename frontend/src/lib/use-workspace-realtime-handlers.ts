@@ -21,7 +21,7 @@ type UseWorkspaceRealtimeHandlersOptions = {
     ((options?: { silent?: boolean; forceFresh?: boolean }) => Promise<void>) | null
   >;
   scheduleWorkspaceDetailRefresh: (orgId: string) => void;
-  scheduleWorkspaceListRefresh: () => void;
+  scheduleWorkspaceListRefresh: (delayMs?: number, options?: { forceFresh?: boolean }) => void;
   setWorkspaces: Dispatch<SetStateAction<Workspace[]>>;
   showToastRef: MutableRefObject<ShowToast | null>;
   updateWsState: (
@@ -108,24 +108,29 @@ export function useWorkspaceRealtimeHandlers({
 
     if (event.type === "sync_started") {
       updateWsState(event.org_id, { syncing: true });
-      scheduleWorkspaceListRefresh();
+      if (!event.summary) {
+        scheduleWorkspaceListRefresh();
+      }
       return;
     }
 
     if (event.type === "workspace_updated") {
       updateWsState(event.org_id, { syncing: false });
-      scheduleWorkspaceListRefresh();
+      if (!event.summary) {
+        scheduleWorkspaceListRefresh();
+      }
       scheduleWorkspaceDetailRefresh(event.org_id);
       setWorkspaces((prev) =>
         prev.map((workspace) =>
           workspace.org_id === event.org_id
             ? {
                 ...workspace,
-                sync_reason: event.reason ?? workspace.sync_reason,
+                ...event.summary,
+                sync_reason: event.reason ?? event.summary?.sync_reason ?? workspace.sync_reason,
                 next_sync_at:
-                  event.next_sync_at !== undefined ? event.next_sync_at : workspace.next_sync_at,
-                hot_until: event.hot_until !== undefined ? event.hot_until : workspace.hot_until,
-                is_hot: event.is_hot ?? workspace.is_hot,
+                  event.next_sync_at !== undefined ? event.next_sync_at : event.summary?.next_sync_at ?? workspace.next_sync_at,
+                hot_until: event.hot_until !== undefined ? event.hot_until : event.summary?.hot_until ?? workspace.hot_until,
+                is_hot: event.is_hot ?? event.summary?.is_hot ?? workspace.is_hot,
                 pending_invites:
                   event.summary?.pending_invites ?? workspace.pending_invites,
                 member_count: event.summary?.member_count ?? workspace.member_count,

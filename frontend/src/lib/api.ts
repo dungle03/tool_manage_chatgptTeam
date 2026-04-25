@@ -17,6 +17,12 @@ import type {
   UnauthorizedMemberMode,
 } from "@/types/api";
 
+export type WorkspaceDetails = {
+  members: Member[];
+  invites: Invite[];
+  unauthorized_findings: UnauthorizedFinding[];
+};
+
 // Lấy admin token từ env (nếu có), dev mode không cần
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
 const GET_CACHE_TTL_MS = 3_000;
@@ -29,7 +35,9 @@ function authHeaders(): HeadersInit {
   return h;
 }
 
-export async function getWorkspaces(options?: { forceFresh?: boolean }): Promise<Workspace[]> {
+export async function getWorkspaces(options?: {
+  forceFresh?: boolean;
+}): Promise<Workspace[]> {
   return requestJson("/api/workspaces", "GET", undefined, options);
 }
 
@@ -37,28 +45,55 @@ export async function getWorkspaceMembers(
   orgId: string,
   options?: { forceFresh?: boolean },
 ): Promise<Member[]> {
-  return requestJson(`/api/workspaces/${orgId}/members`, "GET", undefined, options);
+  return requestJson(
+    `/api/workspaces/${orgId}/members`,
+    "GET",
+    undefined,
+    options,
+  );
+}
+
+export async function getWorkspaceDetails(
+  orgId: string,
+  options?: { forceFresh?: boolean },
+): Promise<WorkspaceDetails> {
+  return requestJson(
+    `/api/workspaces/${orgId}/details`,
+    "GET",
+    undefined,
+    options,
+  );
 }
 
 export async function listUnauthorizedFindings(
   orgId: string,
   options?: { forceFresh?: boolean },
 ): Promise<UnauthorizedFinding[]> {
-  return requestJson(`/api/workspaces/${orgId}/unauthorized-members`, "GET", undefined, options);
+  return requestJson(
+    `/api/workspaces/${orgId}/unauthorized-members`,
+    "GET",
+    undefined,
+    options,
+  );
 }
 
 export type GlobalUnauthorizedFinding = UnauthorizedFinding & {
   workspace_name: string;
 };
 
-export async function listAllUnauthorizedFindings(
-  options?: { forceFresh?: boolean },
-): Promise<GlobalUnauthorizedFinding[]> {
+export async function listAllUnauthorizedFindings(options?: {
+  forceFresh?: boolean;
+}): Promise<GlobalUnauthorizedFinding[]> {
   return requestJson("/api/unauthorized-findings", "GET", undefined, options);
 }
 
-export async function syncWorkspace(orgId: string): Promise<WorkspaceSyncResult> {
-  return requestJson<WorkspaceSyncResult>(`/api/workspaces/${orgId}/sync`, "POST");
+export async function syncWorkspace(
+  orgId: string,
+): Promise<WorkspaceSyncResult> {
+  return requestJson<WorkspaceSyncResult>(
+    `/api/workspaces/${orgId}/sync`,
+    "POST",
+  );
 }
 
 export async function updateWorkspaceUnauthorizedMode(
@@ -101,45 +136,108 @@ export async function importTeam(payload: {
   org_id?: string;
   name?: string;
 }): Promise<WorkspaceImportResult> {
-  return requestJson<WorkspaceImportResult>("/api/teams/import", "POST", payload);
+  return requestJson<WorkspaceImportResult>(
+    "/api/teams/import",
+    "POST",
+    payload,
+  );
 }
 
-export async function inviteMember(payload: { org_id: string; email: string; role?: string }): Promise<InviteMutationResult> {
+export async function inviteMember(payload: {
+  org_id: string;
+  email: string;
+  role?: string;
+}): Promise<InviteMutationResult> {
   return requestJson<InviteMutationResult>("/api/invite", "POST", payload);
 }
 
-export async function kickMember(payload: { org_id: string; member_id: number }): Promise<MemberMutationResult> {
+export async function kickMember(payload: {
+  org_id: string;
+  member_id: number;
+}): Promise<MemberMutationResult> {
   return requestJson<MemberMutationResult>("/api/member", "DELETE", payload);
 }
 
-export async function listInvites(orgId: string, options?: { forceFresh?: boolean }): Promise<Invite[]> {
-  return requestJson<Invite[]>(`/api/invites?org_id=${orgId}`, "GET", undefined, options);
+export async function listInvites(
+  orgId: string,
+  options?: { forceFresh?: boolean; refreshRemote?: boolean },
+): Promise<Invite[]> {
+  const params = new URLSearchParams({ org_id: orgId });
+  if (options?.refreshRemote) {
+    params.set("refresh_remote", "true");
+  }
+  return requestJson<Invite[]>(
+    `/api/invites?${params.toString()}`,
+    "GET",
+    undefined,
+    options,
+  );
 }
 
-export async function resendInvite(payload: { org_id: string; invite_id: string; email?: string }): Promise<InviteMutationResult> {
-  return requestJson<InviteMutationResult>("/api/resend-invite", "POST", payload);
+export async function resendInvite(payload: {
+  org_id: string;
+  invite_id: string;
+  email?: string;
+}): Promise<InviteMutationResult> {
+  return requestJson<InviteMutationResult>(
+    "/api/resend-invite",
+    "POST",
+    payload,
+  );
 }
 
-export async function cancelInvite(payload: { org_id: string; invite_id: string; email?: string }): Promise<InviteMutationResult> {
-  return requestJson<InviteMutationResult>("/api/cancel-invite", "DELETE", payload);
+export async function cancelInvite(payload: {
+  org_id: string;
+  invite_id: string;
+  email?: string;
+}): Promise<InviteMutationResult> {
+  return requestJson<InviteMutationResult>(
+    "/api/cancel-invite",
+    "DELETE",
+    payload,
+  );
 }
 
-export async function deleteWorkspace(orgId: string): Promise<WorkspaceDeleteResult> {
-  return requestJson<WorkspaceDeleteResult>(`/api/workspaces/${orgId}`, "DELETE");
+export async function deleteWorkspace(
+  orgId: string,
+): Promise<WorkspaceDeleteResult> {
+  return requestJson<WorkspaceDeleteResult>(
+    `/api/workspaces/${orgId}`,
+    "DELETE",
+  );
 }
 
-export async function renameWorkspace(orgId: string, name: string): Promise<WorkspaceRenameResult> {
-  return requestJson<WorkspaceRenameResult>(`/api/workspaces/${orgId}/name`, "PATCH", { name });
+export async function renameWorkspace(
+  orgId: string,
+  name: string,
+): Promise<WorkspaceRenameResult> {
+  return requestJson<WorkspaceRenameResult>(
+    `/api/workspaces/${orgId}/name`,
+    "PATCH",
+    { name },
+  );
 }
 
-export async function updateWorkspaceToken(orgId: string, accessToken: string): Promise<WorkspaceTokenUpdateResult> {
-  return requestJson<WorkspaceTokenUpdateResult>(`/api/workspaces/${orgId}/token`, "PATCH", {
-    access_token: accessToken,
-  });
+export async function updateWorkspaceToken(
+  orgId: string,
+  accessToken: string,
+): Promise<WorkspaceTokenUpdateResult> {
+  return requestJson<WorkspaceTokenUpdateResult>(
+    `/api/workspaces/${orgId}/token`,
+    "PATCH",
+    {
+      access_token: accessToken,
+    },
+  );
 }
 
-export async function refreshWorkspaceToken(orgId: string): Promise<WorkspaceTokenRefreshResult> {
-  return requestJson<WorkspaceTokenRefreshResult>(`/api/workspaces/${orgId}/refresh-token`, "POST");
+export async function refreshWorkspaceToken(
+  orgId: string,
+): Promise<WorkspaceTokenRefreshResult> {
+  return requestJson<WorkspaceTokenRefreshResult>(
+    `/api/workspaces/${orgId}/refresh-token`,
+    "POST",
+  );
 }
 
 export function invalidateApiCache() {
@@ -190,7 +288,10 @@ async function requestJson<T = unknown>(
     const res = await fetch(url, {
       method,
       headers: authHeaders(),
-      body: body !== undefined && method !== "GET" ? JSON.stringify(body) : undefined,
+      body:
+        body !== undefined && method !== "GET"
+          ? JSON.stringify(body)
+          : undefined,
       cache: "no-store",
     });
 
@@ -198,7 +299,8 @@ async function requestJson<T = unknown>(
       let detail = `HTTP ${res.status}`;
       try {
         const data = await res.json();
-        const backendDetail = typeof data?.detail === "string" ? data.detail.trim() : "";
+        const backendDetail =
+          typeof data?.detail === "string" ? data.detail.trim() : "";
         if (backendDetail) {
           detail = backendDetail.startsWith("HTTP ")
             ? backendDetail
