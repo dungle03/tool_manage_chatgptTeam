@@ -47,6 +47,7 @@ export function useWorkspaceLoadAndSync({
           invites: mergeInviteLists(
             wsStatesRef.current[orgId]?.invites ?? [],
             details.invites,
+            details.members,
           ),
         });
       } catch (error) {

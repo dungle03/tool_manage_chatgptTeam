@@ -102,6 +102,26 @@ describe("workspace state helpers", () => {
     expect(result[1].email).toBe("a@company.com");
   });
 
+  it("drops pending invites when the invited email has become a member", () => {
+    const acceptedMember: Member = {
+      ...memberA,
+      email: "tool-created@company.com",
+    };
+    const localPendingInvite: Invite = {
+      id: 3,
+      org_id: "org_001",
+      email: "TOOL-CREATED@company.com",
+      invite_id: "inv_tool",
+      status: "pending",
+      created_at: "2026-03-13T00:00:00+00:00",
+    };
+
+    const result = mergeInviteLists([localPendingInvite, inviteA], [inviteA], [acceptedMember]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].email).toBe("a@company.com");
+  });
+
   it("replaces a matching invite by id or email", () => {
     const updatedInvite = { ...inviteA, status: "resent" };
     const result = replaceInvite([inviteA, inviteB], "inv_a", updatedInvite);

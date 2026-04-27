@@ -78,17 +78,36 @@ export function upsertInvite(invites: Invite[], invite: Invite): Invite[] {
   return [invite, ...withoutDuplicate];
 }
 
-export function mergeInviteLists(currentInvites: Invite[], incomingInvites: Invite[]): Invite[] {
-  const merged = [...incomingInvites];
+export function getMemberEmailSet(members: Member[]): Set<string> {
+  return new Set(
+    members
+      .map((member) => member.email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function mergeInviteLists(
+  currentInvites: Invite[],
+  incomingInvites: Invite[],
+  members: Member[] = [],
+): Invite[] {
+  const memberEmails = getMemberEmailSet(members);
+  const merged = incomingInvites.filter(
+    (invite) => !memberEmails.has(invite.email.trim().toLowerCase()),
+  );
 
   for (const invite of currentInvites) {
+    const inviteEmail = invite.email.trim().toLowerCase();
     const alreadyIncluded = merged.some(
-      (item) => item.invite_id === invite.invite_id || item.email === invite.email,
+      (item) => item.invite_id === invite.invite_id || item.email.trim().toLowerCase() === inviteEmail,
     );
     if (alreadyIncluded) {
       continue;
     }
     if (invite.status !== "pending") {
+      continue;
+    }
+    if (memberEmails.has(inviteEmail)) {
       continue;
     }
     merged.push(invite);

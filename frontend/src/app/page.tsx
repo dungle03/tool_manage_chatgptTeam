@@ -157,6 +157,7 @@ export default function DashboardPage() {
         invites: mergeInviteLists(
           wsStatesRef.current[orgId]?.invites ?? [],
           details.invites,
+          details.members,
         ),
         syncing: false,
       });
