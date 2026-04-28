@@ -151,7 +151,6 @@ function CompactWorkspaceCardComponent({
   onManage,
 }: CompactWorkspaceCardProps) {
   const seatLimit = memberLimit > 0 ? memberLimit : 7;
-  const safeMembers = Math.min(members, seatLimit);
   const statusText = status === "synced" ? "LIVE" : "ISSUE";
   const tokenStatusCopy = getTokenStatusCopy(accessTokenExpiresAt, lastSync);
   const teamExpiryDate = formatDisplayDate(expiresAt);
@@ -248,7 +247,7 @@ function CompactWorkspaceCardComponent({
             <span className="compact-info-symbol"><MetaIcon type="members" /></span>
             <span>Members</span>
           </span>
-          <strong>{safeMembers} / {seatLimit}</strong>
+          <strong>{members} / {seatLimit}</strong>
         </div>
         <div className="compact-info-row">
           <span className="compact-info-label">
