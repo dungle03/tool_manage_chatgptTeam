@@ -213,10 +213,23 @@ async def sync_workspace_data(
 
         try:
             access_token = await resolve_access_token(workspace)
-            remote_members, remote_invites = await asyncio.gather(
+            remote_members, remote_invites, account_infos = await asyncio.gather(
                 chatgpt_service.get_members(access_token, account_id),
                 chatgpt_service.get_invites(access_token, account_id),
+                chatgpt_service.get_account_info(access_token),
             )
+
+            # Update expires_at and member_limit from latest entitlement data
+            for info in account_infos:
+                info_account_id = str(info.get("account_id") or "")
+                if info_account_id == account_id:
+                    new_expires = parse_datetime(info.get("expires_at"))
+                    if new_expires is not None:
+                        workspace.expires_at = new_expires
+                    new_limit = info.get("member_limit")
+                    if new_limit and int(new_limit) > 0:
+                        workspace.member_limit = int(new_limit)
+                    break
 
             whitelisted_remote_ids, whitelisted_emails = build_authorization_whitelist(
                 session,

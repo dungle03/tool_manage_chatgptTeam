@@ -17,6 +17,23 @@ from app.models import Base, Invite, Member, Workspace
 
 
 @pytest.fixture(autouse=True)
+def _mock_get_account_info(monkeypatch, request):
+    """Auto-mock get_account_info so sync tests don't hit real ChatGPT API.
+    Skip mocking for test_chatgpt_service.py so we can test the actual method.
+    """
+    if "test_chatgpt_service.py" in str(request.node.nodeid):
+        return
+
+    async def _noop_get_account_info(_self, _access_token):
+        return []
+
+    monkeypatch.setattr(
+        "app.services.chatgpt.ChatGPTService.get_account_info",
+        _noop_get_account_info,
+    )
+
+
+@pytest.fixture(autouse=True)
 def clean_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
