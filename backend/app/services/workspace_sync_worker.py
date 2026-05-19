@@ -11,6 +11,7 @@ async def run_background_sync_loop(
     *,
     run_token_refresh_cycle: BackgroundCycle,
     run_sync_cycle: BackgroundCycle,
+    run_personal_plan_sync_cycle: BackgroundCycle | None = None,
     loop_interval_seconds: int,
     logger: logging.Logger,
 ) -> None:
@@ -30,6 +31,15 @@ async def run_background_sync_loop(
                 "Background sync loop error while running sync cycle: %s",
                 exc,
             )
+
+        if run_personal_plan_sync_cycle is not None:
+            try:
+                await run_personal_plan_sync_cycle(session_factory)
+            except Exception as exc:
+                logger.exception(
+                    "Background sync loop error while running personal plan sync cycle: %s",
+                    exc,
+                )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=loop_interval_seconds)
         except TimeoutError:

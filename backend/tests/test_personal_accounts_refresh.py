@@ -28,6 +28,9 @@ def _clear_refresh_state(monkeypatch):
     refresh._REFRESH_LOCKS.clear()
     refresh._REFRESH_TASKS.clear()
     monkeypatch.setenv("ENABLE_EXPERIMENTAL_CHATGPT_OAUTH", "true")
+    monkeypatch.setattr(
+        refresh, "fetch_personal_plan_entitlement", AsyncMock(return_value=None)
+    )
     yield
     refresh._REFRESH_LOCKS.clear()
     refresh._REFRESH_TASKS.clear()
@@ -134,8 +137,8 @@ def test_invalid_grant_marks_need_relogin_without_retry(
 def test_health_check_marks_live(client, db_session, monkeypatch):
     account = _account(db_session, status="die")
     monkeypatch.setattr(
-        "app.services.personal_accounts.health.chatgpt_service.get_account_info",
-        AsyncMock(return_value=[]),
+        "app.services.personal_accounts.health.fetch_personal_plan_entitlement",
+        AsyncMock(return_value=None),
     )
 
     response = client.post(f"/api/personal-accounts/{account.id}/check")

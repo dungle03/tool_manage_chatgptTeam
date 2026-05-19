@@ -13,6 +13,13 @@ export type PersonalAccount = {
   email: string;
   name: string;
   plan_type: string;
+  subscription_plan: string | null;
+  plan_expires_at: string | null;
+  plan_renews_at: string | null;
+  last_plan_sync_at: string | null;
+  next_plan_sync_at: string | null;
+  plan_sync_error: string | null;
+  plan_sync_fail_count: number;
   status: PersonalAccountStatus | string;
   is_active: boolean;
   token_expires_at: string | null;

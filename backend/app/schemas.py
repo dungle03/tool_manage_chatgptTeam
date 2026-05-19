@@ -130,6 +130,13 @@ class PersonalAccountOut(BaseModel):
     email: str
     name: str
     plan_type: str
+    subscription_plan: str | None = None
+    plan_expires_at: datetime | None = None
+    plan_renews_at: datetime | None = None
+    last_plan_sync_at: datetime | None = None
+    next_plan_sync_at: datetime | None = None
+    plan_sync_error: str | None = None
+    plan_sync_fail_count: int = 0
     status: str
     is_active: bool
     token_expires_at: datetime | None = None

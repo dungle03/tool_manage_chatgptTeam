@@ -10,6 +10,7 @@ import {
   resolvePersonalAccountDuplicate,
   startPersonalAccountOAuth,
   startPersonalAccountReconnect,
+  syncPersonalAccounts,
 } from "@/lib/api";
 import type {
   DuplicateDecision,
@@ -47,7 +48,10 @@ const statusCopy: Record<string, { label: string; tone: string; hint: string }> 
 
 function formatDateTime(value: string | null): string {
   if (!value) return "Chưa có";
-  const date = new Date(value);
+  const normalizedValue = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value)
+    ? value
+    : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalizedValue);
   if (Number.isNaN(date.getTime())) return "Không rõ";
   return new Intl.DateTimeFormat("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -82,6 +86,7 @@ export function PersonalAccountsPanel({ showToast, setHeaderActions = () => unde
   const [error, setError] = useState<string | null>(null);
   const [busyAccounts, setBusyAccounts] = useState<Record<number, BusyAction | undefined>>({});
   const [startingOAuth, setStartingOAuth] = useState(false);
+  const [syncingPlans, setSyncingPlans] = useState(false);
   const [callbackUrl, setCallbackUrl] = useState("");
   const [submittingCallbackUrl, setSubmittingCallbackUrl] = useState(false);
   const [oauthModal, setOauthModal] = useState<OAuthModalState | null>(null);
@@ -106,6 +111,13 @@ export function PersonalAccountsPanel({ showToast, setHeaderActions = () => unde
 
   useEffect(() => {
     void loadAccounts({ forceFresh: true });
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadAccounts({ silent: true, forceFresh: true });
+    }, 15_000);
+    return () => window.clearInterval(interval);
   }, [loadAccounts]);
 
   useEffect(() => {
@@ -138,6 +150,15 @@ export function PersonalAccountsPanel({ showToast, setHeaderActions = () => unde
     setHeaderActions(
       <>
         <button
+          id="personal-account-sync-plans-btn"
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => void handleSyncPlans()}
+          disabled={syncingPlans || loading || accounts.length === 0}
+        >
+          {syncingPlans ? "Syncing..." : "Sync Plans"}
+        </button>
+        <button
           id="personal-account-reload-btn"
           type="button"
           className="btn btn-ghost"
@@ -158,11 +179,37 @@ export function PersonalAccountsPanel({ showToast, setHeaderActions = () => unde
       </>,
     );
     return () => setHeaderActions(null);
-  }, [loadAccounts, loading, setHeaderActions, startingOAuth]);
+  }, [accounts.length, loadAccounts, loading, setHeaderActions, startingOAuth, syncingPlans]);
 
   function upsertAccount(account: PersonalAccount | null) {
     if (!account) return;
     setAccounts((current) => current.map((item) => item.id === account.id ? account : item));
+  }
+
+  async function handleSyncPlans() {
+    setSyncingPlans(true);
+    try {
+      const result = await syncPersonalAccounts({ limit: 10, force: true });
+      const updated = result.results
+        .map((item) => item.account)
+        .filter((account): account is PersonalAccount => Boolean(account));
+      if (updated.length > 0) {
+        setAccounts((current) => current.map((item) => updated.find((account) => account.id === item.id) || item));
+      }
+      showToast(
+        "Sync Plans hoàn tất",
+        `Đã sync ${result.synced}/${result.selected} account, lỗi ${result.failed}.`,
+        result.failed ? "info" : "success",
+        "personal-sync-plans-finished",
+      );
+      await loadAccounts({ silent: true, forceFresh: true });
+      window.setTimeout(() => void loadAccounts({ silent: true, forceFresh: true }), 1500);
+      window.setTimeout(() => void loadAccounts({ silent: true, forceFresh: true }), 4000);
+    } catch (err) {
+      showToast("Sync Plans thất bại", getErrorMessage(err), "error", "personal-sync-plans-failed");
+    } finally {
+      setSyncingPlans(false);
+    }
   }
 
   async function handleStartOAuth() {
@@ -530,6 +577,7 @@ function PersonalAccountCard({
 
       <div className="compact-card-divider" />
 
+      <PersonalCompactTokenRow label="Plus renews" value={formatDateTime(account.plan_renews_at || account.plan_expires_at)} icon="calendar" tone="neutral" />
       <PersonalCompactTokenRow label="Token expires" value={formatDateTime(account.token_expires_at)} icon="token" tone="success" />
       <PersonalCompactTokenRow label="Last checked" value={formatDateTime(account.last_checked_at)} icon="calendar" tone="neutral" />
 
@@ -620,6 +668,12 @@ function PersonalAccountManageModal({
 
         <div className="personal-manage-grid">
           <PersonalMeta label="Plan" value={account.plan_type || "unknown"} />
+          <PersonalMeta label="Subscription" value={account.subscription_plan || "unknown"} />
+          <PersonalMeta label="Plus renews" value={formatDateTime(account.plan_renews_at)} />
+          <PersonalMeta label="Plus expires" value={formatDateTime(account.plan_expires_at)} />
+          <PersonalMeta label="Last plan sync" value={formatDateTime(account.last_plan_sync_at)} />
+          <PersonalMeta label="Next plan sync" value={formatDateTime(account.next_plan_sync_at)} />
+          <PersonalMeta label="Plan sync error" value={account.plan_sync_error || "None"} />
           <PersonalMeta label="OAuth" value={account.oauth_connected ? "Connected" : "Disconnected"} />
           <PersonalMeta label="Last checked" value={formatDateTime(account.last_checked_at)} />
           <PersonalMeta label="Last refreshed" value={formatDateTime(account.last_refreshed_at)} />

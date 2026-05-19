@@ -304,6 +304,20 @@ export async function checkPersonalAccount(
   );
 }
 
+export async function syncPersonalAccounts(options?: {
+  limit?: number;
+  force?: boolean;
+}): Promise<{ ok: boolean; selected: number; synced: number; failed: number; results: PersonalAccountActionResult[] }> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.force) params.set("force", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson(
+    `/api/personal-accounts/sync${suffix}`,
+    "POST",
+  );
+}
+
 export async function deletePersonalAccount(
   accountId: number,
 ): Promise<PersonalAccountActionResult> {

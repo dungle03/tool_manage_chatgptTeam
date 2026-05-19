@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.models import PersonalAccount
 from app.services.personal_accounts.config import get_oauth_settings
-from app.services.personal_accounts.health import mark_need_relogin
+from app.services.personal_accounts.health import (
+    apply_personal_plan_entitlement,
+    fetch_personal_plan_entitlement,
+    mark_need_relogin,
+)
 from app.services.personal_accounts.redaction import compact_error_message
 from app.services.personal_accounts.serializers import personal_account_to_public
 from app.services.personal_accounts.tokens import resolve_token_expires_at, utc_now
@@ -164,6 +168,12 @@ async def _refresh_personal_account_locked(session: Session, account_id: int) ->
         account.last_error_code = None
         account.last_error_message = None
         account.reauth_required_at = None
+        try:
+            plan_info = await fetch_personal_plan_entitlement(account)
+        except Exception:
+            plan_info = None
+        if plan_info is not None:
+            apply_personal_plan_entitlement(account, plan_info)
         account.updated_at = now
         session.commit()
         session.refresh(account)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Workspace
 from app.services.chatgpt import chatgpt_service
 from app.services.events import workspace_event_broker
+from app.services.personal_accounts.sync import run_personal_plan_sync_cycle
 from app.services.token_refresher import (
     is_workspace_token_refresh_in_progress as is_workspace_token_refresh_in_progress,
     run_token_refresher_for_workspace,
@@ -418,6 +419,7 @@ async def _background_sync_loop(
         stop_event,
         run_token_refresh_cycle=run_token_refresh_cycle,
         run_sync_cycle=run_sync_cycle,
+        run_personal_plan_sync_cycle=run_personal_plan_sync_cycle,
         loop_interval_seconds=SYNC_LOOP_INTERVAL_SECONDS,
         logger=logger,
     )

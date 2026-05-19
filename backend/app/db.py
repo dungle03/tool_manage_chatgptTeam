@@ -134,6 +134,25 @@ def _migrate_add_missing_columns() -> None:
                 conn, "invites", "ix_invites_org_id_invite_id", "org_id, invite_id"
             )
 
+        if inspector.has_table("personal_accounts"):
+            existing = {c["name"] for c in inspector.get_columns("personal_accounts")}
+            new_cols = {
+                "subscription_plan": "VARCHAR",
+                "plan_expires_at": "DATETIME",
+                "plan_renews_at": "DATETIME",
+                "last_plan_sync_at": "DATETIME",
+                "next_plan_sync_at": "DATETIME",
+                "plan_sync_error": "TEXT",
+                "plan_sync_fail_count": "INTEGER DEFAULT 0",
+            }
+            for col, col_type in new_cols.items():
+                if col not in existing:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE personal_accounts ADD COLUMN {col} {col_type}"
+                        )
+                    )
+
         _create_unauthorized_findings_table_if_missing(conn, inspector)
         inspector = inspect(conn)
         if inspector.has_table("unauthorized_findings"):

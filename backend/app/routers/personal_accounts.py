@@ -26,6 +26,7 @@ from app.services.personal_accounts.repository import (
     soft_delete_personal_account,
 )
 from app.services.personal_accounts.serializers import personal_account_to_public
+from app.services.personal_accounts.sync import sync_due_personal_plan_accounts
 
 router = APIRouter(prefix="/api/personal-accounts", tags=["personal-accounts"])
 
@@ -52,6 +53,22 @@ def list_accounts(
     _token: str = Depends(verify_admin_token),
 ):
     return list_personal_accounts(session)
+
+
+@router.post("/sync")
+async def sync_accounts(
+    limit: int = Query(5, ge=1, le=25),
+    force: bool = Query(False),
+    _token: str = Depends(verify_admin_token),
+):
+    from app.db import SessionLocal
+
+    return await sync_due_personal_plan_accounts(
+        SessionLocal,
+        limit=limit,
+        force=force,
+        trigger="manual",
+    )
 
 
 @router.get("/{account_id}", response_model=PersonalAccountOut)
