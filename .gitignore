@@ -57,3 +57,6 @@ backend/exports/
 
 # powershell
 *.ps1
+
+# agents
+AGENTS.md

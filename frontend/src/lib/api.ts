@@ -16,6 +16,13 @@ import type {
   WorkspaceTokenUpdateResult,
   UnauthorizedMemberMode,
 } from "@/types/api";
+import type {
+  DuplicateDecision,
+  PersonalAccount,
+  PersonalAccountActionResult,
+  PersonalOAuthResult,
+  PersonalOAuthStart,
+} from "@/types/personal-accounts";
 
 export type WorkspaceDetails = {
   members: Member[];
@@ -236,6 +243,81 @@ export async function refreshWorkspaceToken(
 ): Promise<WorkspaceTokenRefreshResult> {
   return requestJson<WorkspaceTokenRefreshResult>(
     `/api/workspaces/${orgId}/refresh-token`,
+    "POST",
+  );
+}
+
+export async function getPersonalAccounts(options?: {
+  forceFresh?: boolean;
+}): Promise<PersonalAccount[]> {
+  return requestJson<PersonalAccount[]>(
+    "/api/personal-accounts",
+    "GET",
+    undefined,
+    options,
+  );
+}
+
+export async function startPersonalAccountOAuth(): Promise<PersonalOAuthStart> {
+  return requestJson<PersonalOAuthStart>(
+    "/api/personal-accounts/oauth/start",
+    "POST",
+  );
+}
+
+export async function completePersonalAccountOAuthWithCallbackUrl(
+  callbackUrl: string,
+): Promise<PersonalOAuthResult> {
+  return requestJson<PersonalOAuthResult>(
+    "/api/personal-accounts/oauth/callback-url",
+    "POST",
+    { callback_url: callbackUrl },
+  );
+}
+
+export async function resolvePersonalAccountDuplicate(
+  duplicateToken: string,
+  decision: DuplicateDecision,
+): Promise<PersonalOAuthResult> {
+  return requestJson<PersonalOAuthResult>(
+    "/api/personal-accounts/oauth/resolve-duplicate",
+    "POST",
+    { duplicate_token: duplicateToken, decision },
+  );
+}
+
+export async function refreshPersonalAccount(
+  accountId: number,
+): Promise<PersonalAccountActionResult> {
+  return requestJson<PersonalAccountActionResult>(
+    `/api/personal-accounts/${accountId}/refresh`,
+    "POST",
+  );
+}
+
+export async function checkPersonalAccount(
+  accountId: number,
+): Promise<PersonalAccountActionResult> {
+  return requestJson<PersonalAccountActionResult>(
+    `/api/personal-accounts/${accountId}/check`,
+    "POST",
+  );
+}
+
+export async function deletePersonalAccount(
+  accountId: number,
+): Promise<PersonalAccountActionResult> {
+  return requestJson<PersonalAccountActionResult>(
+    `/api/personal-accounts/${accountId}`,
+    "DELETE",
+  );
+}
+
+export async function startPersonalAccountReconnect(
+  accountId: number,
+): Promise<PersonalOAuthStart> {
+  return requestJson<PersonalOAuthStart>(
+    `/api/personal-accounts/${accountId}/reconnect/start`,
     "POST",
   );
 }

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import SessionLocal, init_db
-from app.routers import events, invites, members, workspaces
+from app.routers import events, invites, members, personal_accounts, workspaces
 from app.services.workspace_sync import (
     start_background_sync_worker,
     stop_background_sync_worker,
@@ -48,3 +48,4 @@ app.include_router(workspaces.router)
 app.include_router(members.router)
 app.include_router(invites.router)
 app.include_router(events.router)
+app.include_router(personal_accounts.router)

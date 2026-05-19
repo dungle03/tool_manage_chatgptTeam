@@ -114,3 +114,45 @@ class UnauthorizedFinding(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class PersonalAccount(Base):
+    __tablename__ = "personal_accounts"
+    __table_args__ = (
+        Index("ix_personal_accounts_provider_email", "provider", "email"),
+        Index(
+            "ix_personal_accounts_provider_account_id",
+            "provider",
+            "provider_account_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, default="codex")
+    provider_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String, default="")
+    plan_type: Mapped[str] = mapped_column(String, default="unknown")
+    status: Mapped[str] = mapped_column(String, default="unknown", index=True)
+    auth_type: Mapped[str] = mapped_column(String, default="oauth")
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    refresh_token_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reauth_required_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    provider_specific_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )

@@ -121,3 +121,64 @@ class InviteActionRequest(BaseModel):
     org_id: str
     invite_id: str
     email: str | None = None
+
+
+class PersonalAccountOut(BaseModel):
+    id: int
+    provider: str
+    auth_type: str
+    email: str
+    name: str
+    plan_type: str
+    status: str
+    is_active: bool
+    token_expires_at: datetime | None = None
+    last_checked_at: datetime | None = None
+    last_refreshed_at: datetime | None = None
+    next_refresh_at: datetime | None = None
+    last_error_code: str | None = None
+    last_error_message: str | None = None
+    oauth_connected: bool
+    requires_relogin: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PersonalAccountActionOut(BaseModel):
+    ok: bool
+    message: str
+    account: PersonalAccountOut | None = None
+    next_action: str | None = None
+
+
+class PersonalAccountDuplicateOut(BaseModel):
+    ok: bool = False
+    code: str = "duplicate_detected"
+    message: str = "Account already exists"
+    duplicate_token: str
+    duplicate: PersonalAccountOut
+    pending_account: dict[str, str] | None = None
+    options: list[str] = ["overwrite_existing", "create_new", "cancel"]
+
+
+class PersonalOAuthStartOut(BaseModel):
+    authorization_url: str
+    state: str
+    expires_in: int
+
+
+class PersonalOAuthCallbackUrlRequest(BaseModel):
+    callback_url: str
+
+
+class PersonalOAuthDuplicateResolveRequest(BaseModel):
+    duplicate_token: str
+    decision: str
+
+
+class PersonalOAuthResultOut(BaseModel):
+    status: str
+    account: PersonalAccountOut | None = None
+    duplicate_token: str | None = None
+    existing_account: PersonalAccountOut | None = None
+    new_account: dict[str, str] | None = None

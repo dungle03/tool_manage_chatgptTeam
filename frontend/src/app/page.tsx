@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
 import { DashboardSummary } from "@/components/dashboard-summary";
 import { WorkspaceCard } from "@/components/workspace-card";
 import { WorkspaceDetailPanel } from "@/components/workspace-detail-panel";
@@ -12,6 +12,7 @@ import { GlobalUnauthorizedAlert } from "@/components/global-unauthorized-alert"
 import { RenameWorkspaceDialog } from "@/components/rename-workspace-dialog";
 import { ToastStack } from "@/components/toast-stack";
 import { UpdateTokenDialog } from "@/components/update-token-dialog";
+import { PersonalAccountsPanel } from "@/components/personal-accounts-panel";
 import {
   getWorkspaces,
   getWorkspaceDetails,
@@ -51,6 +52,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
   const [viewMode, setViewMode] = useState<DashboardViewMode>("compact");
+  const [activeDashboardTab, setActiveDashboardTab] = useState<"team" | "personal">("team");
+  const [personalHeaderActions, setPersonalHeaderActions] = useState<ReactNode>(null);
   const [focusedWorkspaceId, setFocusedWorkspaceId] = useState<string | null>(null);
   const [managedWorkspaceId, setManagedWorkspaceId] = useState<string | null>(null);
   const [renamingWorkspace, setRenamingWorkspace] = useState<Workspace | null>(null);
@@ -477,23 +480,62 @@ export default function DashboardPage() {
     <main className={`dashboard-layout${viewMode === "compact" ? " dashboard-layout-compact" : ""}`}>
       <div className="dashboard-header">
         <div className="dashboard-header-copy">
-          <span className="eyebrow">Workspace control center</span>
-          <h1 className="dashboard-title">ChatGPT Team Manager</h1>
+          <span className="eyebrow">
+            {activeDashboardTab === "personal" ? "Personal OAuth Vault" : "Workspace control center"}
+          </span>
+          <h1 className="dashboard-title">
+            {activeDashboardTab === "personal" ? "Personal ChatGPT Accounts" : "ChatGPT Team Manager"}
+          </h1>
           <p className="dashboard-subtitle">
-            Theo dõi workspace, quản lý thành viên và xử lý lời mời trong một dashboard.
+            {activeDashboardTab === "personal"
+              ? "Theo dõi trạng thái tài khoản ChatGPT cá nhân."
+              : "Theo dõi workspace, quản lý thành viên và xử lý lời mời trong một dashboard."}
           </p>
         </div>
         <div className="dashboard-header-actions">
-          <DashboardViewToggle value={viewMode} onChange={setViewMode} />
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowImport(true)}
-            id="import-team-btn"
-          >
-            + Import Team
-          </button>
+          {activeDashboardTab === "team" && (
+            <>
+              <DashboardViewToggle value={viewMode} onChange={setViewMode} />
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowImport(true)}
+                id="import-team-btn"
+              >
+                + Import Team
+              </button>
+            </>
+          )}
+          {activeDashboardTab === "personal" && personalHeaderActions}
         </div>
       </div>
+
+      <div className="dashboard-tab-switcher" role="tablist" aria-label="Dashboard sections">
+        <button
+          id="team-workspaces-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardTab === "team"}
+          className={`dashboard-tab-button${activeDashboardTab === "team" ? " is-active" : ""}`}
+          onClick={() => setActiveDashboardTab("team")}
+        >
+          Team Workspaces
+        </button>
+        <button
+          id="personal-accounts-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardTab === "personal"}
+          className={`dashboard-tab-button${activeDashboardTab === "personal" ? " is-active" : ""}`}
+          onClick={() => setActiveDashboardTab("personal")}
+        >
+          Personal Accounts
+        </button>
+      </div>
+
+      {activeDashboardTab === "personal" ? (
+        <PersonalAccountsPanel showToast={showToast} setHeaderActions={setPersonalHeaderActions} />
+      ) : (
+        <>
 
       {/* syncErrors is intentionally commented out while the Health card is hidden.
           syncErrors={syncErrors} */}
@@ -675,6 +717,8 @@ export default function DashboardPage() {
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {showImport && (

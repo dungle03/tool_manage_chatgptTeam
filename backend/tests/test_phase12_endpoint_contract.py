@@ -56,7 +56,7 @@ def test_workspace_sync_endpoint_has_phase2_shape(client, seed_data):
 
 
 def test_workspace_import_returns_richer_contract(client, monkeypatch):
-    async def fake_get_account_info(_self, _access_token):
+    async def fake_get_account_info(_access_token):
         return [
             {
                 "account_id": "org_import_1",
@@ -67,7 +67,7 @@ def test_workspace_import_returns_richer_contract(client, monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info
+        "app.routers.workspaces.chatgpt_service.get_account_info", fake_get_account_info
     )
 
     response = client.post(
@@ -95,7 +95,7 @@ def test_workspace_import_returns_richer_contract(client, monkeypatch):
 def test_workspace_import_returns_partial_success_when_followup_schedule_fails(
     client, monkeypatch
 ):
-    async def fake_get_account_info(_self, _access_token):
+    async def fake_get_account_info(_access_token):
         return [
             {
                 "account_id": "org_import_warn_1",
@@ -112,13 +112,13 @@ def test_workspace_import_returns_partial_success_when_followup_schedule_fails(
         reason,
         delay_seconds=None,
         hot_window_seconds=None,
-        publish_event=True
+        publish_event=True,
     ):
         if workspace.org_id == "org_import_warn_1":
             raise RuntimeError("schedule phase failed")
 
     monkeypatch.setattr(
-        "app.services.chatgpt.ChatGPTService.get_account_info", fake_get_account_info
+        "app.routers.workspaces.chatgpt_service.get_account_info", fake_get_account_info
     )
     monkeypatch.setattr(
         "app.routers.workspaces.schedule_followup_sync", fake_schedule_followup_sync
